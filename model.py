@@ -103,3 +103,7 @@ class VectorReducer:
         x = torch.randn(1, self.df.shape[1]).to(self.device)
         mu, _, _ = self.model(x)
         return make_dot(mu, params=dict(self.model.named_parameters()))
+    
+    def move_to_cpu(self):
+        #Move the model to CPU. This method centralizes the logic for device handling
+        self.model = self.model.to('cpu')

@@ -6,7 +6,7 @@ import torch
 from data import DataLoader
 from logger import setup_logger
 from model import VectorReducer
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Manager, Process
 from scipy.interpolate import RBFInterpolator
 from scipy.spatial.distance import euclidean
 from sklearn.model_selection import train_test_split
@@ -81,18 +81,23 @@ def compute_validation_error(reducer, data):
     data_tensor = torch.tensor(data.values).float().to(reducer.device)
     with torch.no_grad():
         return reducer.compute_loss(data_tensor, compute_gradients=False)
+    
+
+# Progress listener process
+def progress_listener(queue, total):
+    with tqdm(total=total) as pbar:
+        while True:
+            msg = queue.get()
+            if msg == 'DONE':
+                break
+            pbar.update(1)
 
 
-# Funzione per addestrare e validare
-def train_and_validate(n_epochs, params, df_train, df_test, pretrained_model=None):
+def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_model=None):
     try:
         # unpack params
         learning_rate, weight_decay, n_layers, layer_dim, activation_name, kl_beta, mse_beta = params
         activation = get_activation_function(activation_name)
-
-        #print(f"Params: n_epochs={n_epochs}, learning_rate={learning_rate}, weight_decay={weight_decay}, "
-                         #f"n_layers={n_layers}, layer_dim={layer_dim}, activation={activation_name}, "
-                         #f"kl_beta={kl_beta}, mse_beta={mse_beta}")
 
         # Costruzione e addestramento del modello
         reducer = VectorReducer(df_train, learning_rate, weight_decay, n_layers, layer_dim, activation, kl_beta, mse_beta, pretrained_model)
@@ -105,7 +110,9 @@ def train_and_validate(n_epochs, params, df_train, df_test, pretrained_model=Non
     except Exception as e:
         print(f"Error during VAE optimization: {e}")
         return float('inf'), params, None  # Ritorna un valore alto per continuare l'ottimizzazione
-    
+    finally:
+        queue.put(1) # Notify progress
+
 
 def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, save_filepath=None, pretrained_model=None):
     print(f"{log_prefix} Starting VAE optimization...")
@@ -124,31 +131,30 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
 
     # Get all combinations of hyperparameters
     param_combinations = list(itertools.product(*vae_grid.values()))
+    total_combinations = len(param_combinations)
     print(f"{log_prefix} Total hyperparameter combinations: {len(param_combinations)}")
 
-    # Debug log for parameter combinations (Punto 5)
-    for i, combination in enumerate(param_combinations):  # Limitiamoci alle prime 5 per non inondare i log
-        print(f"{log_prefix} Sample parameter combination {i + 1}: {combination}")
-
     # Prepare for multiprocessing
-    input_data = [(params[0], params[1:], df_train, df_test, pretrained_model) for params in param_combinations]
+    manager = Manager()
+    queue = manager.Queue()
+    listener = Process(target=progress_listener, args=(queue, total_combinations))
+    listener.start()
 
-    # Prepare for multiprocessing
-    with Pool(processes=cpu_count()) as pool:
-        results = pool.starmap(train_and_validate, input_data)
+    input_data = [(queue, params[0], params[1:], df_train, df_test, pretrained_model) for params in param_combinations]
+
 
     # Find the best result
     best_validation_error = float('inf')
     best_params = None
     best_model = None
 
-    for idx, result in enumerate(results):
-        # Controllo della validità del risultato
-        # if not isinstance(result, tuple) or len(result) != 3:
-        #     print(f"{log_prefix} Invalid result at index {idx}: {result}")
-        #     continue
+    with Pool(processes=cpu_count()) as pool:
+        results = pool.starmap(train_and_validate, input_data)
 
+
+    for _, result in enumerate(results):
         validation_error, params, model = result
+
         print(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
 
         if validation_error < best_validation_error:
@@ -161,7 +167,12 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     if save_pretrained_model:
         torch.save(best_model, f'{save_filepath}.pt')
 
+    queue.put('DONE')
+    listener.join()
+
     return best_params, best_model
+
+
 
 
 def main():
