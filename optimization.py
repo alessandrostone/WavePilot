@@ -105,6 +105,7 @@ def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_mo
 
         # Validazione
         validation_error = compute_validation_error(reducer, df_test)
+        reducer.move_to_cpu()
         return validation_error, params, reducer.model
 
     except Exception as e:
@@ -118,16 +119,29 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     print(f"{log_prefix} Starting VAE optimization...")
 
     # VAE's params' grid
+    # vae_grid = {
+    #     'n_epochs': [5, 10, 25, 50, 100, 150, 200],
+    #     'learning_rate': np.logspace(-5, -2, num=3),
+    #     'weight_decay': np.logspace(-5, -2, num=3),
+    #     'n_layers': list(range(1, 5)),
+    #     'layer_dim': [32, 64, 128, 256],
+    #     'activation': ['ReLU', 'LeakyReLU', 'Sigmoid'],
+    #     'kl_beta': np.linspace(0.05, 0.5, num=10),
+    #     'mse_beta': np.linspace(0.3, 1.0, num=10)
+    # }
+
+        # VAE's params' grid
     vae_grid = {
-        'n_epochs': [5, 10, 25, 50, 100, 150, 200],
+        'n_epochs': [5, 10, 25, 50],
         'learning_rate': np.logspace(-5, -2, num=3),
         'weight_decay': np.logspace(-5, -2, num=3),
-        'n_layers': list(range(1, 5)),
-        'layer_dim': [32, 64, 128, 256],
-        'activation': ['ReLU', 'LeakyReLU', 'Sigmoid'],
-        'kl_beta': np.linspace(0.05, 0.5, num=10),
-        'mse_beta': np.linspace(0.3, 1.0, num=10)
+        'n_layers': list(range(1, 3)),
+        'layer_dim': [64, 128],
+        'activation': ['ReLU', 'LeakyReLU'],
+        'kl_beta': np.linspace(0.05, 0.5, num=5),
+        'mse_beta': np.linspace(0.3, 1.0, num=5)
     }
+
 
     # Get all combinations of hyperparameters
     param_combinations = list(itertools.product(*vae_grid.values()))
@@ -162,7 +176,7 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
             best_params = params
             best_model = model
 
-    print(f'Best VAE hyperparams: {best_params} with a validation error of {best_validation_error}')
+    log.info(f'Best VAE hyperparams: {best_params} with a validation error of {best_validation_error}')
 
     if save_pretrained_model:
         torch.save(best_model, f'{save_filepath}.pt')
