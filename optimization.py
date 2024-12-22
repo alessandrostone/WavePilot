@@ -125,16 +125,12 @@ def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_mo
 
 def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, save_filepath=None, pretrained_model=None):
     
-    
     manager = Manager()
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
 
     log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
-
     listener_log = log_listener(log_queue, log.handlers)
-
-
 
     log_progress.info(f"{log_prefix} Starting VAE optimization...")
 
@@ -150,16 +146,16 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     #     'mse_beta': np.linspace(0.3, 1.0, num=10)
     # }
 
-        # VAE's params' grid
+    # VAE's params' grid
     vae_grid = {
-        'n_epochs': [5, 10, 25, 50],
+        'n_epochs': [25, 50, 100],
         'learning_rate': np.logspace(-5, -2, num=3),
         'weight_decay': np.logspace(-5, -2, num=3),
         'n_layers': list(range(1, 3)),
-        'layer_dim': [64, 128],
-        'activation': ['ReLU', 'LeakyReLU'],
-        'kl_beta': np.linspace(0.05, 0.5, num=5),
-        'mse_beta': np.linspace(0.3, 1.0, num=5)
+        'layer_dim': [128],
+        'activation': ['ReLU', 'LeakyReLU', 'Sigmoid'],
+        'kl_beta': np.linspace(0.05, 0.5, num=10),
+        'mse_beta': np.linspace(0.3, 1.0, num=8)
     }
 
 
@@ -187,11 +183,25 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     for _, result in enumerate(results):
         validation_error, params, model = result
 
+        n_epochs = result[1]
+
+                # Converti params in formato dizionario
+        param_dict = {
+            #'num_epochs': n_epochs,
+            "learning_rate": params[0],
+            "weight_decay": params[1],
+            "n_layers": params[2],
+            "layer_dim": params[3],
+            "activation_function": params[4],
+            "kl_beta": params[5],
+            "mse_beta": params[6]
+        }
+
         log_progress.info(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
 
         if validation_error < best_validation_error:
             best_validation_error = validation_error
-            best_params = params
+            best_params = param_dict
             best_model = model
 
     progress_queue.put('DONE')
