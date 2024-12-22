@@ -1,6 +1,5 @@
 import argparse
 import itertools
-import logging
 import numpy as np
 import torch
 
@@ -56,7 +55,7 @@ def get_arguments():
 
 
 
-log_progress = setup_logger('ProgressLogger', level=logging.INFO, file=False)
+log_progress = setup_logger('ProgressLogger', file=False)
 
 
 # Load data
@@ -131,7 +130,7 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
 
-    log = setup_logger('OptimizationLogger', log_queue=log_queue, level=logging.INFO, file=True)
+    log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
 
     listener_log = log_listener(log_queue, log.handlers)
 
