@@ -1,10 +1,12 @@
 import argparse
 import itertools
+import logging
 import numpy as np
 import torch
 
 from data import DataLoader
 from logger import setup_logger
+from logging.handlers import QueueListener 
 from model import VectorReducer
 from multiprocessing import Pool, cpu_count, Manager, Process
 from scipy.interpolate import RBFInterpolator
@@ -53,8 +55,8 @@ def get_arguments():
     return parser.parse_args()
 
 
-log = setup_logger('Opmization Session', file=True)
 
+log_progress = setup_logger('ProgressLogger', level=logging.INFO, file=False)
 
 
 # Load data
@@ -64,9 +66,9 @@ def load_data(filepath, num_entries=None):
 
     if num_entries:
         df = df.sample(n=num_entries, random_state=42)
-        print(f'Randomly selected {num_entries} entries from ther dataset.')
+        log_progress.info(f'Randomly selected {num_entries} entries from the dataset')
     else:
-        print(f'Using the entire dataset.')
+        log_progress.info(f'Using the entire dataset !')
     
     return df
 
@@ -93,6 +95,13 @@ def progress_listener(queue, total):
             pbar.update(1)
 
 
+def log_listener(log_queue, handlers):
+    listener = QueueListener(log_queue, *handlers)
+    listener.start()
+    return listener
+
+
+
 def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_model=None):
     try:
         # unpack params
@@ -109,14 +118,26 @@ def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_mo
         return validation_error, params, reducer.model
 
     except Exception as e:
-        print(f"Error during VAE optimization: {e}")
+        log_progress.error(f"Error during VAE optimization: {e}")
         return float('inf'), params, None  # Ritorna un valore alto per continuare l'ottimizzazione
     finally:
         queue.put(1) # Notify progress
 
 
 def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, save_filepath=None, pretrained_model=None):
-    print(f"{log_prefix} Starting VAE optimization...")
+    
+    
+    manager = Manager()
+    progress_queue = manager.Queue()
+    log_queue = manager.Queue()
+
+    log = setup_logger('OptimizationLogger', log_queue=log_queue, level=logging.INFO, file=True)
+
+    listener_log = log_listener(log_queue, log.handlers)
+
+
+
+    log_progress.info(f"{log_prefix} Starting VAE optimization...")
 
     # VAE's params' grid
     # vae_grid = {
@@ -146,15 +167,13 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     # Get all combinations of hyperparameters
     param_combinations = list(itertools.product(*vae_grid.values()))
     total_combinations = len(param_combinations)
-    print(f"{log_prefix} Total hyperparameter combinations: {len(param_combinations)}")
+    log_progress.info(f"{log_prefix} Total hyperparameter combinations: {len(param_combinations)}")
 
     # Prepare for multiprocessing
-    manager = Manager()
-    queue = manager.Queue()
-    listener = Process(target=progress_listener, args=(queue, total_combinations))
-    listener.start()
+    listener_process = Process(target=progress_listener, args=(progress_queue, total_combinations))
+    listener_process.start()
 
-    input_data = [(queue, params[0], params[1:], df_train, df_test, pretrained_model) for params in param_combinations]
+    input_data = [(progress_queue, params[0], params[1:], df_train, df_test, pretrained_model) for params in param_combinations]
 
 
     # Find the best result
@@ -169,20 +188,23 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     for _, result in enumerate(results):
         validation_error, params, model = result
 
-        print(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
+        log_progress.info(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
 
         if validation_error < best_validation_error:
             best_validation_error = validation_error
             best_params = params
             best_model = model
 
+    progress_queue.put('DONE')
+    listener_process.join()
+
+    log_queue.put(None)
+    listener_log.stop()
+
     log.info(f'Best VAE hyperparams: {best_params} with a validation error of {best_validation_error}')
 
     if save_pretrained_model:
         torch.save(best_model, f'{save_filepath}.pt')
-
-    queue.put('DONE')
-    listener.join()
 
     return best_params, best_model
 
@@ -195,7 +217,7 @@ def main():
         torch.manual_seed(42)
 
         device = get_device()
-        print(f"Using device: {device}")
+        log_progress.info(f"Using device: {device}")
 
         filepath = args.filepath
         num_entries = args.num_entries
@@ -219,7 +241,7 @@ def main():
             best_params_train, _ = optimize_vae(df_train, df_test, 'Train')
 
     except Exception as e:
-        print(f'Error in main: {e}')
+        log_progress.error(f'Error in main: {e}')
 
 
 if __name__ == '__main__':
