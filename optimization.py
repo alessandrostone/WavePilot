@@ -125,6 +125,24 @@ def train_and_validate(queue, n_epochs, params, df_train, df_test, pretrained_mo
 
 def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, save_filepath=None, pretrained_model=None):
     
+    #VAE's params' grid
+    vae_grid = {
+        'n_epochs': [50, 100],
+        'learning_rate': np.logspace(-5, -2, num=3),
+        'weight_decay': np.logspace(-5, -2, num=3),
+        'n_layers': list(range(1, 2)),
+        'layer_dim': [128],
+        'activation': ['ReLU', 'LeakyReLU'],
+        'kl_beta': np.linspace(0.05, 0.5, num=10),
+        'mse_beta': np.linspace(0.3, 1.0, num=8)
+    }
+
+    # Get all combinations of hyperparameters
+    param_combinations = list(itertools.product(*vae_grid.values()))
+    total_combinations = len(param_combinations)
+    #log_progress.info(f"{log_prefix} Total hyperparameter combinations: {len(param_combinations)}")
+
+    # Logger configurations
     manager = Manager()
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
@@ -132,83 +150,57 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
     listener_log = log_listener(log_queue, log.handlers)
 
-    log_progress.info(f"{log_prefix} Starting VAE optimization...")
-
-    # VAE's params' grid
-    # vae_grid = {
-    #     'n_epochs': [5, 10, 25, 50, 100, 150, 200],
-    #     'learning_rate': np.logspace(-5, -2, num=3),
-    #     'weight_decay': np.logspace(-5, -2, num=3),
-    #     'n_layers': list(range(1, 5)),
-    #     'layer_dim': [32, 64, 128, 256],
-    #     'activation': ['ReLU', 'LeakyReLU', 'Sigmoid'],
-    #     'kl_beta': np.linspace(0.05, 0.5, num=10),
-    #     'mse_beta': np.linspace(0.3, 1.0, num=10)
-    # }
-
-    # VAE's params' grid
-    vae_grid = {
-        'n_epochs': [25, 50, 100],
-        'learning_rate': np.logspace(-5, -2, num=3),
-        'weight_decay': np.logspace(-5, -2, num=3),
-        'n_layers': list(range(1, 3)),
-        'layer_dim': [128],
-        'activation': ['ReLU', 'LeakyReLU', 'Sigmoid'],
-        'kl_beta': np.linspace(0.05, 0.5, num=10),
-        'mse_beta': np.linspace(0.3, 1.0, num=8)
-    }
-
-
-    # Get all combinations of hyperparameters
-    param_combinations = list(itertools.product(*vae_grid.values()))
-    total_combinations = len(param_combinations)
-    log_progress.info(f"{log_prefix} Total hyperparameter combinations: {len(param_combinations)}")
-
-    # Prepare for multiprocessing
+    # Progress listener
     listener_process = Process(target=progress_listener, args=(progress_queue, total_combinations))
     listener_process.start()
 
-    input_data = [(progress_queue, params[0], params[1:], df_train, df_test, pretrained_model) for params in param_combinations]
+    try:
+        log_progress.info(f"{log_prefix} Starting VAE optimization...")
 
+        input_data = [(progress_queue, params[0], params[1:], df_train, df_test, pretrained_model) 
+                      for params in param_combinations]
+        
+        with Pool(processes=cpu_count()) as pool:
+            results = pool.starmap(train_and_validate, input_data)
 
-    # Find the best result
-    best_validation_error = float('inf')
-    best_params = None
-    best_model = None
+        # Find the best result
+        best_validation_error = float('inf')
+        best_params = None
+        best_model = None
 
-    with Pool(processes=cpu_count()) as pool:
-        results = pool.starmap(train_and_validate, input_data)
+        for idx, result in enumerate(results):
+            validation_error, params, model = result
 
+            n_epochs = input_data[idx][1]
 
-    for _, result in enumerate(results):
-        validation_error, params, model = result
+            # Converti params in formato dizionario
+            param_dict = {
+                'num_epochs': n_epochs,
+                "learning_rate": params[0],
+                "weight_decay": params[1],
+                "n_layers": params[2],
+                "layer_dim": params[3],
+                "activation_function": params[4],
+                "kl_beta": params[5],
+                "mse_beta": params[6]
+            }
 
-        n_epochs = result[1]
+            log_progress.info(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
 
-                # Converti params in formato dizionario
-        param_dict = {
-            #'num_epochs': n_epochs,
-            "learning_rate": params[0],
-            "weight_decay": params[1],
-            "n_layers": params[2],
-            "layer_dim": params[3],
-            "activation_function": params[4],
-            "kl_beta": params[5],
-            "mse_beta": params[6]
-        }
+            if validation_error < best_validation_error:
+                best_validation_error = validation_error
+                best_params = param_dict
+                best_model = model
+    
+    except Exception as e:
+        log_progress.error(f'{log_prefix} Error during optimization: {e}')
+        raise
 
-        log_progress.info(f"{log_prefix} Validation Error: {validation_error:.4f} | Params: {params}")
-
-        if validation_error < best_validation_error:
-            best_validation_error = validation_error
-            best_params = param_dict
-            best_model = model
-
-    progress_queue.put('DONE')
-    listener_process.join()
-
-    log_queue.put(None)
-    listener_log.stop()
+    finally:
+        progress_queue.put('DONE')
+        listener_process.join()
+        log_queue.put(None)
+        listener_log.stop()
 
     log.info(f'Best VAE hyperparams: {best_params} with a validation error of {best_validation_error}')
 
@@ -216,6 +208,7 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
         torch.save(best_model, f'{save_filepath}.pt')
 
     return best_params, best_model
+
 
 
 
