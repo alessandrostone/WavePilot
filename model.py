@@ -54,7 +54,7 @@ class VectorReducer:
     def __init__(self, df, learning_rate, weight_decay, n_layers, layer_dim, activation, kl_beta, mse_beta, pretrained_model=None):
 
         self.device = get_device()
-        self.df = torch.tensor(df.values).float()
+        self.df = torch.tensor(df).float()
 
 
         if pretrained_model is None:
@@ -107,3 +107,4 @@ class VectorReducer:
     def move_to_cpu(self):
         #Move the model to CPU. This method centralizes the logic for device handling
         self.model = self.model.to('cpu')
+        self.df = self.df.to('cpu')

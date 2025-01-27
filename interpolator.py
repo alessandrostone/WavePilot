@@ -14,7 +14,12 @@ class RBFInterpolation:
         self.kernel = kernel
         self.epsilon = epsilon
         self.degree = degree
-        self.interpolator = RBFInterpolator(self.reduced_data, self.original_data, smoothing=self.smoothing, kernel=self.kernel, epsilon=self.epsilon, degree=self.degree)
+        self.interpolator = RBFInterpolator(self.reduced_data, 
+                                            self.original_data, 
+                                            smoothing=self.smoothing, 
+                                            kernel=self.kernel, 
+                                            epsilon=self.epsilon, 
+                                            degree=self.degree)
         
         self.minX = np.min(reduced_data[:, 0])
         self.maxX = np.max(reduced_data[:, 0])

@@ -1,8 +1,9 @@
-import numpy as np
+#import numpy as np
 import torch
 
 from torch import nn, optim
 from torchviz import make_dot
+from utils import get_device
 
 
 torch.manual_seed(42)
@@ -52,13 +53,22 @@ class VAE(nn.Module):
 
 class VectorReducer:
     def __init__(self, df, learning_rate, weight_decay, n_layers, activation, kl_beta, mse_beta, pretrained_model=None):
-        self.df = torch.tensor(df.values).float()
+
+        # Set proper device
+        self.device = get_device()
+        #print(f'Using device: {self.device}')
+
+        self.df = torch.tensor(df.values).float().to(self.device)
         if pretrained_model is None:
-            self.model = VAE(self.df.shape[1], n_layers, activation)
+            self.model = VAE(self.df.shape[1], n_layers, activation).to(self.device)
         else:
-            self.model = pretrained_model
+            self.model = pretrained_model.to(self.device)
+
+        # Optimizer init    
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+        # Params config
         self.kl_beta = kl_beta
         self.mse_beta = mse_beta
 
@@ -66,11 +76,11 @@ class VectorReducer:
         return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     
     def compute_loss(self, data, compute_gradients=False):
+        #print(f"Data device: {data.device}, Model device: {next(self.model.parameters()).device}")
         mu, logvar, output = self.model(data)
         recon_loss = self.criterion(output, data)
         kl_loss = self.kl_divergence(mu, logvar)
         mse_loss = (output - data).pow(2).mean()
-
         # Weighted sum of losses
         loss = recon_loss + (kl_loss * self.kl_beta) + (mse_loss * self.mse_beta)
 
@@ -88,8 +98,10 @@ class VectorReducer:
     def vae(self):
         with torch.no_grad(): # no need to calculate gradients during evaluation
             mu, _, decoded = self.model(self.df)
-        reduced_data = mu.detach().numpy()
-        reconstructed_data = decoded.detach().numpy()
+        #reduced_data = mu.detach().numpy()
+        reduced_data = mu.cpu().detach().numpy()  # Porta su CPU prima di convertire in NumPy
+        #reconstructed_data = decoded.detach().numpy()
+        reconstructed_data = decoded.cpu().detach().numpy()  # Porta su CPU
         # Add back ID as the first element of each sublist
         #reduced_data_with_ids = np.column_stack((self.ids, reduced_data))
         #return reduced_data_with_ids, reconstructed_data
