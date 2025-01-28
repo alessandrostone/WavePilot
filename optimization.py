@@ -1,5 +1,6 @@
 import argparse
 import itertools
+from logging import Logger
 import numpy as np
 import torch
 
@@ -55,8 +56,7 @@ def get_arguments():
 
 
 
-log_progress = setup_logger('ProgressLogger', file=False)
-
+log_progress: Logger = setup_logger('ProgressLogger', file=False)
 
 # Load data
 def load_data(filepath, num_entries=None):
@@ -379,6 +379,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
 
 
 def main():
+    
     try:
         args = get_arguments()
         torch.manual_seed(42)
