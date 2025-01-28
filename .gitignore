@@ -6,6 +6,7 @@ snapshots/*
 *.txt
 audio/*
 data/*
+.data/*
 output/*
 random_selection.py
 *.RPP

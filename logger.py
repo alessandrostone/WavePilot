@@ -1,10 +1,23 @@
 import time
 import logging
+import os
 
 from logging.handlers import QueueHandler
 
 
 def setup_logger(name, log_queue=None, level=logging.INFO, file=False):
+    folder_path = "logs/"
+    
+    try:
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+            print(f"Folder created: {folder_path}")
+        else:
+            # print(f"Logs folder already exists: {folder_path}")
+            pass
+    except OSError as e:
+        print(f"Error: {e}")
+    
     logger = logging.getLogger(name)
     logger.setLevel(level)
 

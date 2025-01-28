@@ -54,7 +54,7 @@ class VectorReducer:
     def __init__(self, df, learning_rate, weight_decay, n_layers, layer_dim, activation, kl_beta, mse_beta, pretrained_model=None):
 
         self.device = get_device()
-        self.df = torch.tensor(df).float()
+        self.df: torch.Tensor = torch.tensor(df).float()
 
 
         if pretrained_model is None:
@@ -93,8 +93,11 @@ class VectorReducer:
             self.compute_loss(self.df, compute_gradients=True)
 
     def vae(self):
+        device = next(self.model.parameters()).device
+        print(f"Model is on device: {device}")
+        print(f"Input data is on device: {self.df.device}")
         with torch.no_grad(): # no need to calculate gradients during evaluation
-            mu, _, decoded = self.model(self.df)
+            mu, _, decoded = self.model(self.df.to(device))
         reduced_data = mu.detach().cpu().numpy()
         reconstructed_data = decoded.detach().cpu().numpy()
         return reduced_data, reconstructed_data
