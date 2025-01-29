@@ -172,20 +172,15 @@ async def main():
 
         reducer.train_vae(n_epochs)
         reduced_data, reconstructed_data = reducer.vae()
-
-        #reduced_data = reduced_data[:, 1:] # get rid of ID
         
     except FileNotFoundError:
         logging.error('You must provide at least a dataset!')
         exit(1)
 
-    #original_data = df.drop(['ID', 'name', 'file'], axis=1)
     original_data = df.values # to np array
     # Uncomment the line below to plot the reconstruction error
     plot_reconstruction_error(original_data, reduced_data, reconstructed_data)
 
-    #print(f'TRAIN Original data {original_data}')
-    #print(f'TRAIN Reduced data {reduced_data}')
 
     interpolator = RBFInterpolation(reduced_data, original_data, smoothing, kernel, epsilon, degree)
     visualizer = Visualize(reduced_data, app, socketio)
