@@ -431,15 +431,15 @@ def main():
 
             activation_train = get_activation_function(activation_name_train)
             reducer_train = VectorReducer(original_data_train, learning_rate_train, weight_decay_train, n_layers_train, layer_dim_train, activation_train, kl_beta_train, mse_beta_train)
-            print("VR called!")
+            #print("VR called!")
             reducer_train.train_vae(n_epochs_train)
-            print("TV called!")
+            #print("TV called!")
             reduced_data, _ = reducer_train.vae()
-            print("Reducer called!")
+            #print("Reducer called!")
+            #print(f"Reduced data is on device: {reducer_train.device}")
 
-            
             print(f"Reduced data is on device: {reducer_train.device}")
-        #optimize_interpolator(original_data_train, reduced_data, 'Interpolator')
+        optimize_interpolator(original_data_train, reduced_data, 'Interpolator')
 
     except Exception as e:
         log_progress.error(f'Error in main: {e}')
