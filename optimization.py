@@ -210,8 +210,6 @@ def interpolate_and_validate(progress_queue, params, original_data, reduced_data
         return float('inf'), params
     
 
-
-
 def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, save_filepath=None, pretrained_model=None):
     
     #VAE's params' grid
@@ -328,7 +326,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
 
-    log = setup_logger('InterpolatorLogger', log_queue=log_queue, file=True)
+    log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
     listener_log = log_listener(log_queue, log.handlers)
 
     # Listener per il progresso
