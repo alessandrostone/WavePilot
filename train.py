@@ -181,7 +181,6 @@ async def main():
     # Uncomment the line below to plot the reconstruction error
     plot_reconstruction_error(original_data, reduced_data, reconstructed_data)
 
-
     interpolator = RBFInterpolation(reduced_data, original_data, smoothing, kernel, epsilon, degree)
     visualizer = Visualize(reduced_data, app, socketio)
 
@@ -199,4 +198,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
