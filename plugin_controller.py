@@ -1,44 +1,46 @@
-import json
+import argparse
 import queue
 import threading
 from pythonosc import dispatcher, osc_server, udp_client
 from logger import setup_logger
+from utils import load_osc_addresses
 
-# Logger setup
-logging = setup_logger('ReaLearn OSC Sender')
 
-# Create a queue for incoming data packages
+def get_arguments():
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-f', '--filepath',
+                        dest='filepath',
+                        type=str,
+                        required=True,
+                        help="Path to the JSON file containing OSC addresses.")
+
+    parser.add_argument('-r', '--receive_port',
+                        dest='receive_port',
+                        type=int,
+                        default=9109,
+                        help="Port to receive OSC messages from external sources.")
+
+    parser.add_argument('-s', '--send_port',
+                        dest='send_port',
+                        type=int,
+                        default=9110,
+                        help="Port to send OSC messages to REAPER.")
+
+    return parser.parse_args()
+
+
+logging = setup_logger('OSC Forwarder')
 data_queue = queue.Queue()
 
-# Global list to store OSC addresses
-osc_addresses = []
 
-def load_osc_addresses(file_path):
-    """
-    Load OSC addresses from a JSON file.
-    Args:
-        file_path (str): Path to the JSON file containing OSC addresses.
-    Returns:
-        list: A list of OSC addresses.
-    """
-    try:
-        with open(file_path, 'r') as f:
-            addresses = json.load(f)
-        logging.info(f"Loaded {len(addresses)} OSC addresses from {file_path}")
-        return addresses
-    except Exception as e:
-        logging.error(f"Error loading OSC addresses: {e}")
-        return []
+def forward_osc_messages(client, osc_addresses, data_queue):
 
-def process_data():
-    """
-    Process data from the queue and send OSC messages.
-    """
-    client = udp_client.SimpleUDPClient("localhost", 5106)  # OSC client to send messages
     while True:
         params = data_queue.get()
         if len(params) != len(osc_addresses):
-            logging.error(f"Mismatch between params length ({len(params)}) and OSC addresses ({len(osc_addresses)})")
+            logging.error(f"Mismatch: received {len(params)} values, but {len(osc_addresses)} addresses are expected.")
         else:
             for addr, value in zip(osc_addresses, params):
                 client.send_message(addr, value)
@@ -46,37 +48,42 @@ def process_data():
 
         data_queue.task_done()
 
-def set_plugin_params(unused_addr, *args):
-    """
-    Receive parameters and add them to the processing queue.
 
-    Args:
-        unused_addr: The OSC address of the incoming message (not used).
-        *args: The parameters received via OSC.
-    """
+def receive_osc_params(unused_addr, *args):
+
     params = list(args)
     data_queue.put(params)
-    logging.info(f"Received params: {params}")
+    logging.info(f"Received OSC message: {params}")
+
 
 def main():
-    global osc_addresses
 
-    # Load OSC addresses
-    osc_addresses = load_osc_addresses("osc_addresses.json")
+    args = get_arguments()
+
+    filepath = args.filepath
+    receive_port = args.receive_port
+    send_port = args.send_port
+
+    # Load OSC addresses from the specified file
+    osc_addresses = load_osc_addresses(filepath)
     if not osc_addresses:
-        logging.error("No OSC addresses loaded. Exiting.")
+        logging.error("No OSC addresses loaded! Exiting.")
         return
 
-    # Set up OSC dispatcher and server
+    # Set up the OSC client to send messages to REAPER
+    client = udp_client.SimpleUDPClient("localhost", send_port)
+
+
+    # Start the forwarding thread
+    forwarding_thread = threading.Thread(target=forward_osc_messages, args=(client, osc_addresses, data_queue), daemon=True)
+    forwarding_thread.start()
+
+    # Set up the OSC server to receive messages
     dispatcher_map = dispatcher.Dispatcher()
-    dispatcher_map.map('/interpolated_data', set_plugin_params)
+    dispatcher_map.map('/interpolated_data', receive_osc_params)
 
-    server = osc_server.ThreadingOSCUDPServer(('localhost', 5106), dispatcher_map)
-    logging.info(f"Serving on: {server.server_address}")
-
-    # Start the processing thread
-    data_thread = threading.Thread(target=process_data, daemon=True)
-    data_thread.start()
+    server = osc_server.ThreadingOSCUDPServer(('localhost', receive_port), dispatcher_map)
+    logging.info(f"Receiving OSC messages on port {receive_port}, forwarding to REAPER on port {send_port}")
 
     try:
         server.serve_forever()
@@ -84,5 +91,10 @@ def main():
         logging.info("Shutting down server.")
         server.shutdown()
 
+
 if __name__ == "__main__":
     main()
+
+
+### receive on 9109
+### send on 9110

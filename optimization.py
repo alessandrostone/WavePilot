@@ -31,6 +31,7 @@ def get_arguments():
     parser.add_argument('-n', '--num_entries',
                         dest='num_entries',
                         type=int,
+                        required=True,
                         default=None,
                         help='Number of random entries to select from the dataset.')
     

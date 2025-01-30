@@ -16,11 +16,11 @@ from visualizer import Visualize
 
 
 IP_ADDRESS = '127.0.0.1'
-IN_PORT = 5105
-OUT_PORT = 5106
+IN_PORT = 9108 # receive on
+OUT_PORT = 9109 # send to
+
 
 logging = setup_logger('Main VAE')
-
 
 def get_arguments():
     parser = argparse.ArgumentParser()
@@ -179,7 +179,7 @@ async def main():
 
     original_data = df.values # to np array
     # Uncomment the line below to plot the reconstruction error
-    plot_reconstruction_error(original_data, reduced_data, reconstructed_data)
+    #plot_reconstruction_error(original_data, reduced_data, reconstructed_data)
 
     interpolator = RBFInterpolation(reduced_data, original_data, smoothing, kernel, epsilon, degree)
     visualizer = Visualize(reduced_data, app, socketio)
