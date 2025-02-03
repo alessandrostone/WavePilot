@@ -1,7 +1,9 @@
-import ast
-import json
-import numpy as np
+"""Utils"""
+
+from ast import literal_eval
 import pandas as pd
+import numpy as np
+#import plotly.express as px
 import plotly.graph_objects as go
 import torch
 
@@ -46,37 +48,34 @@ def load_osc_addresses(file_path):
 
 
 def get_hyperparams_from_log(log_file):
+    """get_hyperparams_from_log
+
+    Args:
+        log_file (_type_): _description_
+
+    Returns:
+        dict: params
+    """
+    with open(log_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
 
     params = {}
-
-    try:
-        with open(log_file, 'r') as f:
-            lines = f.readlines()
-
-        for line in lines:
-            # Extract the best hyperparameters for the VAE
-            if "Best VAE hyperparams" in line:
-                try:
-                    params_str = line.split("Best VAE hyperparams: ")[1].split(" with")[0]
-                    params['vae'] = ast.literal_eval(params_str)
-                except (IndexError, SyntaxError, ValueError) as e:
-                    raise ValueError(f"Error processing VAE parameters from line: {line}. Details: {e}")
-
-            # Extract the best hyperparameters for the interpolator
-            elif "Best Interpolator params" in line:
-                try:
-                    params_str = line.split("Best Interpolator params: ")[1].split(" with")[0]
-                    params['rbf'] = ast.literal_eval(params_str)
-                except (IndexError, SyntaxError, ValueError) as e:
-                    raise ValueError(f"Error processing interpolator parameters from line: {line}. Details: {e}")
-
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"The specified log file does not exist: {log_file}. Details: {e}")
-    except IOError as e:
-        raise IOError(f"Error reading the log file: {log_file}. Details: {e}")
-
-    if not params:
-        raise ValueError("No parameters found in the log file.")
+    for line in lines:
+        if "Best VAE hyperparams" in line:
+            # Get autoencoder's best hyperp fomr log
+            params_str = line.split("Best VAE hyperparams: ")[1].split(" with")[0]
+            params_tuple = literal_eval(params_str)
+            params['vae'] = {'n_epochs': params_tuple[0], 'learning_rate': params_tuple[1],
+                              'weight_decay': params_tuple[2], 'n_layers': params_tuple[3],
+                              'activation': params_tuple[4], 'beta': params_tuple[5]}
+        elif "Best RBF params" in line:
+            # Get interpolator's best hyperp fomr log
+            params_str = line.split("Best RBF params: ")[1].split(" with")[0]
+            params_tuple = literal_eval(params_str)
+            params['rbf'] = {'smoothing': params_tuple[0],
+                              'kernel': params_tuple[1],
+                              'epsilon': params_tuple[2],
+                              'degree': params_tuple[3]}
 
     return params
 

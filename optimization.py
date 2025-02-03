@@ -14,15 +14,17 @@ from multiprocessing import Manager, Pool, Process, cpu_count
 import numpy as np
 from pandas import DataFrame
 import torch
+from pandas import DataFrame
 from scipy.interpolate import RBFInterpolator
 from scipy.spatial.distance import euclidean
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+import utils
 from data import DataLoader
 from logger import setup_logger
 from model import VectorReducer
-from utils import get_activation_function
+
 
 def get_arguments() -> argparse.Namespace:
     """get args
@@ -33,19 +35,24 @@ def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     # (Small) dataset of the presets to be reduced (Mandatory)
-    parser.add_argument('-f', '--filepath',
-                        dest='filepath',
-                        type=str,
-                        required=True,
-                        help='Dataset of the presets to be reduced.')
-    
-    parser.add_argument('-n', '--num_entries',
-                        dest='num_entries',
-                        type=int,
-                        required=True,
-                        default=None,
-                        help='Number of random entries to select from the dataset.')
-    
+    parser.add_argument(
+        "-f",
+        "--filepath",
+        dest="filepath",
+        type=str,
+        required=True,
+        help="Dataset of the presets to be reduced.",
+    )
+
+    parser.add_argument(
+        "-n",
+        "--num_entries",
+        dest="num_entries",
+        type=int,
+        default=None,
+        help="Number of random entries to select from the dataset.",
+    )
+
     # Large dataset of presets to pretrain the model (Optional)
     parser.add_argument(
         "-F",
@@ -88,11 +95,11 @@ def load_data(filepath, num_entries=None) -> DataFrame:
     df = loader.load_presets()
 
     if num_entries:
-        df = df[np.random.choice(df.shape[0], size=num_entries, replace=False)]
+        df = df.sample(n=num_entries, random_state=42)
         log_progress.info("Randomly selected %d entries from the dataset", num_entries)
     else:
-        log_progress.info("Using the entire dataset!")
-    
+        log_progress.info("Using the entire dataset !")
+
     return df
 
 
@@ -115,7 +122,9 @@ def compute_validation_error(reducer, data):
         _type_: _description_
     """
     data_tensor = torch.tensor(data).float().to(reducer.device)
+    # print(f"Validation data device: {data_tensor.device}, Reducer device: {reducer.device}")
     with torch.no_grad():
+        # reducer.model.to(device)
         return reducer.compute_loss(data_tensor, compute_gradients=False)
 
 
@@ -149,7 +158,8 @@ def log_listener(log_queue, handlers) -> QueueListener:
     return listener
 
 
-def train_and_validate(queue, n_epochs, params, original_train, original_test, pretrained_model=None):
+def train_and_validate(queue, n_epochs, params, original_train,
+                        original_test, pretrained_model=None):
     """train and validate
 
     Args:
@@ -201,8 +211,12 @@ def train_and_validate(queue, n_epochs, params, original_train, original_test, p
         return validation_error, params, reducer.model
 
     except Exception as e:
-        log_progress.error("Error during VAE optimization: %s", e)
-        return float('inf'), params, None  # Ritorna un valore alto per continuare l'ottimizzazione
+        log_progress.error("Error during VAE optimization: %s", str(e), exc_info=True)
+        return (
+            float("inf"),
+            params,
+            None,
+        )  # Ritorna un valore alto per continuare l'ottimizzazione
     finally:
         queue.put(1)  # Notify progress
 
@@ -241,16 +255,29 @@ def interpolate_and_validate(
 
         # Ensure degree meets minimum requirements for certain kernels
         if kernel in min_degree and degree < min_degree[kernel]:
-            log_progress.warning("Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)", kernel, degree)
+            log_progress.warning(
+                "Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)",
+                kernel, degree
+            )
             progress_queue.put(1)
             return float("inf"), params  # Invalid configuration
 
         # Calculate the number of polynomial terms for the given degree
         num_poly_terms = 0 if degree == -1 else (degree + 1) * (degree + 2) // 2
         if original_data.shape[0] < num_poly_terms:
-            log_progress.warning("Skipping configuration: insufficient dataset size for degree=%d (requires %d entries)", degree, num_poly_terms)
+            log_progress.warning(
+                "Skipping configuration: insufficient dataset size for degree=%d "
+                "(requires %d entries)",
+                degree,
+                num_poly_terms
+            )
             progress_queue.put(1)
             return float("inf"), params
+
+        # Train the interpolator
+        # original_data = df.values
+        # reduced_data, _ = reducer.vae()
+        # reduced_data = reduced_data[:, 1:]  # Exclude ID column if present
 
         interpolator = RBFInterpolator(
             reduced_data,
@@ -264,26 +291,49 @@ def interpolate_and_validate(
         # Validate interpolator
         interpolated_data = interpolator(reduced_data)
         distances = [
-            euclidean(original, interpolated) for original, interpolated in zip(original_data, interpolated_data)
+            euclidean(original, interpolated) for original,
+              interpolated in zip(original_data, interpolated_data)
         ]
         validation_distance = np.mean(distances)
 
         # Log progress
-        log_progress.info("Configuration validated: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f, validation_distance=%.5f", kernel, degree, smoothing, epsilon, validation_distance)
+        log_progress.info(
+            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, "
+            "epsilon=%f, validation_distance=%.4f",
+            kernel,
+            degree,
+            smoothing,
+            epsilon,
+            validation_distance
+        )
         progress_queue.put(1)
 
         return validation_distance, params
 
     except np.linalg.LinAlgError:
         # Handle singular matrix error
-        log_progress.warning("Skipping configuration due to singular matrix error: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f", kernel, degree, smoothing, epsilon)
+        log_progress.warning(
+            "Skipping configuration due to singular matrix error: "
+            "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
+            kernel,
+            degree,
+            smoothing,
+            epsilon
+        )
         progress_queue.put(1)
         return float("inf"), params
 
     except ValueError as e:
         # Handle specific ValueError for minimum data points
         if "At least" in str(e):
-            log_progress.warning("Skipping configuration due to insufficient data points: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f", kernel, degree, smoothing, epsilon)
+            log_progress.warning(
+                "Skipping configuration due to insufficient data points: "
+                "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
+                kernel,
+                degree,
+                smoothing,
+                epsilon
+            )
             progress_queue.put(1)
             return float("inf"), params
         else:
@@ -291,10 +341,11 @@ def interpolate_and_validate(
 
     except Exception as e:
         # Handle any other exceptions
-        log_progress.error("Unexpected error in interpolate_and_validate: %s", e)
+        log_progress.error("Unexpected error in interpolate_and_validate: %s",
+                          str(e), exc_info=True)
         progress_queue.put(1)
-        return float('inf'), params
-    
+        return float("inf"), params
+
 
 def optimize_vae(
     df_train,
@@ -320,14 +371,14 @@ def optimize_vae(
     print("Optimizing VAE...")
     # VAE's params' grid
     vae_grid = {
-        'n_epochs': [25, 50, 100, 200],
-        'learning_rate': np.logspace(-6, -2, num=5),
-        'weight_decay': np.logspace(-6, -2, num=5),
-        'n_layers': list(range(1, 4)),
-        'layer_dim': [64, 128, 256],
-        'activation': ['ReLU', 'LeakyReLU', 'ELU', 'GELU'],
-        'kl_beta': np.linspace(0.01, 1.0, num=5),
-        'mse_beta': np.linspace(0.1, 2.0, num=5)
+        "n_epochs": [50],
+        "learning_rate": np.logspace(-5, -2, num=3),
+        "weight_decay": np.logspace(-5, -2, num=3),
+        "n_layers": list(range(1, 2)),
+        "layer_dim": [128],
+        "activation": ["ReLU", "LeakyReLU"],
+        "kl_beta": np.linspace(0.05, 0.5, num=2),
+        "mse_beta": np.linspace(0.3, 1.0, num=2),
     }
 
     # Get all combinations of hyperparameters
@@ -380,7 +431,10 @@ def optimize_vae(
                 "mse_beta": params[6],
             }
 
-            log_progress.info("%s Validation Error: %.5f | Params: %s", log_prefix, validation_error, params)
+            log_progress.info("%s Validation Error: %.4f | Params: %s",
+                            log_prefix,
+                            float(validation_error),
+                            str(params))
 
             if validation_error < best_validation_error:
                 best_validation_error = validation_error
@@ -388,7 +442,7 @@ def optimize_vae(
                 best_model = model
 
     except Exception as e:
-        log_progress.error("%s Error during optimization: %s", log_prefix, e)
+        log_progress.error("%s Error during optimization: %s", log_prefix, str(e), exc_info=True)
         raise
 
     finally:
@@ -397,7 +451,8 @@ def optimize_vae(
         log_queue.put(None)
         listener_log.stop()
 
-    log.info("Best VAE hyperparams: %s with a validation error of %.5f", best_params, best_validation_error)
+    log.info("Best VAE hyperparams: %s with a validation error of %f",
+              best_params, best_validation_error)
 
     if save_pretrained_model:
         torch.save(best_model, f"{save_filepath}.pt")
@@ -453,7 +508,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
 
-    log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
+    log = setup_logger("InterpolatorLogger", log_queue=log_queue, file=True)
     listener_log = log_listener(log_queue, log.handlers)
 
     # Listener per il progresso
@@ -461,7 +516,8 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
     listener_process.start()
 
     try:
-        log_progress.info("%s Starting interpolator optimization with %d combinations", log_prefix, total_combinations)
+        log_progress.info("%s Starting interpolator optimization with %d combinations",
+                         log_prefix, total_combinations)
 
         input_data = [
             (
@@ -490,14 +546,16 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
                 "degree": params[3],
             }
 
-            log_progress.info("%s Validation Distance: %.5f | Params: %s", log_prefix, validation_distance, param_dict)
+            log_progress.info("%s Validation Distance: %.4f | Params: %s",
+                            log_prefix, validation_distance, param_dict)
 
             if validation_distance < best_validation_distance:
                 best_validation_distance = validation_distance
                 best_params = param_dict
 
     except Exception as e:
-        log_progress.error("%s Error during interpolator optimization: %s", log_prefix, e)
+        log_progress.error("Unexpected error in interpolate_and_validate: %s",
+                          str(e), exc_info=True)
         raise
 
     finally:
@@ -506,13 +564,19 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
         log_queue.put(None)
         listener_log.stop()
 
-    log.info("%s Best Interpolator params: %s with a validation distance of %.5f", log_prefix, best_params, best_validation_distance)
+    log.info(
+        "%s Best Interpolator params: %s with a validation distance of %.4f",
+        log_prefix,
+        best_params,
+        best_validation_distance
+    )
 
     return best_params
 
 
 def main():
-    """Main"""
+    """Main
+    """
 
     try:
         args = get_arguments()
@@ -535,7 +599,8 @@ def main():
         if filepath_pretrain:
             print("Pretrain filepath provided. Starting pretrain optimization.")
             df_pretrain = load_data(filepath_pretrain)
-            df_train_pretrain, df_test_pretrain = train_test_split(df_pretrain, test_size=0.2, random_state=42)
+            df_train_pretrain, df_test_pretrain = train_test_split(df_pretrain,
+                                                                    test_size=0.2, random_state=42)
             best_params_pretrain, best_model_pretrain = optimize_vae(
                 df_train_pretrain,
                 df_test_pretrain,
@@ -543,7 +608,11 @@ def main():
                 save_pretrained_model=True,
                 save_filepath=filepath_save_pretrain,
             )
-            best_params_train, _ = optimize_vae(df_train, df_test, "Train", pretrained_model=best_model_pretrain)
+            best_params_train, _ = optimize_vae(
+                df_train,
+                df_test,
+                "Train",
+                pretrained_model=best_model_pretrain)
 
             (
                 n_epochs_pretrain,
@@ -594,7 +663,8 @@ def main():
             reducer_train.train_vae(n_epochs_train)
 
         else:
-            best_params_train, _ = optimize_vae(df_train, df_test, 'Train')
+            print("Optimizing VAE parameters...")
+            best_params_train, _ = optimize_vae(original_data_train, original_data_test, "Train")
 
             n_epochs_train = best_params_train["num_epochs"]
             learning_rate_train = best_params_train["learning_rate"]
@@ -605,20 +675,37 @@ def main():
             kl_beta_train = best_params_train["kl_beta"]
             mse_beta_train = best_params_train["mse_beta"]
 
-            activation_train = get_activation_function(activation_name_train)
-            reducer_train = VectorReducer(df_train, learning_rate_train, weight_decay_train, n_layers_train, layer_dim_train, activation_train, kl_beta_train, mse_beta_train)
+            activation_train = utils.get_activation_function(activation_name_train)
 
+            reducer_train = VectorReducer(
+                original_data_train,
+                learning_rate_train,
+                weight_decay_train,
+                n_layers_train,
+                layer_dim_train,
+                activation_train,
+                kl_beta_train,
+                mse_beta_train,
+            )
+            print("VR called!")
             reducer_train.train_vae(n_epochs_train)
         
             reduced_data, _ = reducer_train.vae()
+            # visualized_model = reducer_train.visualize_model()
+            # visualized_model.save("model_graph")
+            print("Reducer called!")
 
             print(f"Reduced data is on device: {reducer_train.device}")
-            optimize_interpolator(df_train, reduced_data, 'Interpolator')
+        # optimize_interpolator(original_data_train, reduced_data, 'Interpolator')
 
     except Exception as e:
-        log_progress.error("Error in main: %s", e)
+        log_progress.error("Error in main: %s", str(e), exc_info=True)
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()  # Required for PyInstaller
+
+if __name__ == "__main__":
+
     multiprocessing.freeze_support()  # Required for PyInstaller
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -626,5 +713,3 @@ if __name__ == "__main__":
     else:
         print("Running in a normal Python process")
     main()
-
-# num_entries = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, n/2]
