@@ -8,9 +8,6 @@ on:
 env:
   GITHUB_SHA: ${{ github.sha }}
   GITHUB_REF: ${{ github.ref }}
-  # IMAGE: europe-west6-docker.pkg.dev/emonitor-engineering-328215/melon-translate/melon-translate:latest
-  # REGISTRY_HOSTNAME: europe-west6-docker.pkg.dev
-  # USE_TESTING_DB: 1
 
 concurrency:
   group: check-commit-${{ github.event.repository.name }}-${{ github.head_ref }}
