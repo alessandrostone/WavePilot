@@ -154,8 +154,7 @@ def log_listener(log_queue, handlers) -> QueueListener:
     return listener
 
 
-def train_and_validate(queue, n_epochs, params, original_train,
-                        original_test, pretrained_model=None):
+def train_and_validate(queue, n_epochs, params, original_train, original_test, pretrained_model=None):
     """train and validate
 
     Args:
@@ -252,8 +251,7 @@ def interpolate_and_validate(
         # Ensure degree meets minimum requirements for certain kernels
         if kernel in min_degree and degree < min_degree[kernel]:
             log_progress.warning(
-                "Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)",
-                kernel, degree
+                "Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)", kernel, degree
             )
             progress_queue.put(1)
             return float("inf"), params  # Invalid configuration
@@ -262,10 +260,9 @@ def interpolate_and_validate(
         num_poly_terms = 0 if degree == -1 else (degree + 1) * (degree + 2) // 2
         if original_data.shape[0] < num_poly_terms:
             log_progress.warning(
-                "Skipping configuration: insufficient dataset size for degree=%d "
-                "(requires %d entries)",
+                "Skipping configuration: insufficient dataset size for degree=%d " "(requires %d entries)",
                 degree,
-                num_poly_terms
+                num_poly_terms,
             )
             progress_queue.put(1)
             return float("inf"), params
@@ -287,20 +284,18 @@ def interpolate_and_validate(
         # Validate interpolator
         interpolated_data = interpolator(reduced_data)
         distances = [
-            euclidean(original, interpolated) for original,
-              interpolated in zip(original_data, interpolated_data)
+            euclidean(original, interpolated) for original, interpolated in zip(original_data, interpolated_data)
         ]
         validation_distance = np.mean(distances)
 
         # Log progress
         log_progress.info(
-            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, "
-            "epsilon=%f, validation_distance=%.4f",
+            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, " "epsilon=%f, validation_distance=%.4f",
             kernel,
             degree,
             smoothing,
             epsilon,
-            validation_distance
+            validation_distance,
         )
         progress_queue.put(1)
 
@@ -309,12 +304,11 @@ def interpolate_and_validate(
     except np.linalg.LinAlgError:
         # Handle singular matrix error
         log_progress.warning(
-            "Skipping configuration due to singular matrix error: "
-            "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
+            "Skipping configuration due to singular matrix error: " "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
             kernel,
             degree,
             smoothing,
-            epsilon
+            epsilon,
         )
         progress_queue.put(1)
         return float("inf"), params
@@ -328,7 +322,7 @@ def interpolate_and_validate(
                 kernel,
                 degree,
                 smoothing,
-                epsilon
+                epsilon,
             )
             progress_queue.put(1)
             return float("inf"), params
@@ -337,8 +331,7 @@ def interpolate_and_validate(
 
     except Exception as e:
         # Handle any other exceptions
-        log_progress.error("Unexpected error in interpolate_and_validate: %s",
-                          str(e), exc_info=True)
+        log_progress.error("Unexpected error in interpolate_and_validate: %s", str(e), exc_info=True)
         progress_queue.put(1)
         return float("inf"), params
 
@@ -426,10 +419,9 @@ def optimize_vae(
                 "mse_beta": params[6],
             }
 
-            log_progress.info("%s Validation Error: %.4f | Params: %s",
-                            log_prefix,
-                            float(validation_error),
-                            str(params))
+            log_progress.info(
+                "%s Validation Error: %.4f | Params: %s", log_prefix, float(validation_error), str(params)
+            )
 
             if validation_error < best_validation_error:
                 best_validation_error = validation_error
@@ -446,8 +438,7 @@ def optimize_vae(
         log_queue.put(None)
         listener_log.stop()
 
-    log.info("Best VAE hyperparams: %s with a validation error of %f",
-              best_params, best_validation_error)
+    log.info("Best VAE hyperparams: %s with a validation error of %f", best_params, best_validation_error)
 
     if save_pretrained_model:
         torch.save(best_model, f"{save_filepath}.pt")
@@ -511,8 +502,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
     listener_process.start()
 
     try:
-        log_progress.info("%s Starting interpolator optimization with %d combinations",
-                         log_prefix, total_combinations)
+        log_progress.info("%s Starting interpolator optimization with %d combinations", log_prefix, total_combinations)
 
         input_data = [
             (
@@ -541,16 +531,14 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
                 "degree": params[3],
             }
 
-            log_progress.info("%s Validation Distance: %.4f | Params: %s",
-                            log_prefix, validation_distance, param_dict)
+            log_progress.info("%s Validation Distance: %.4f | Params: %s", log_prefix, validation_distance, param_dict)
 
             if validation_distance < best_validation_distance:
                 best_validation_distance = validation_distance
                 best_params = param_dict
 
     except Exception as e:
-        log_progress.error("Unexpected error in interpolate_and_validate: %s",
-                          str(e), exc_info=True)
+        log_progress.error("Unexpected error in interpolate_and_validate: %s", str(e), exc_info=True)
         raise
 
     finally:
@@ -563,15 +551,14 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
         "%s Best Interpolator params: %s with a validation distance of %.4f",
         log_prefix,
         best_params,
-        best_validation_distance
+        best_validation_distance,
     )
 
     return best_params
 
 
 def main():
-    """Main
-    """
+    """Main"""
 
     try:
         args = get_arguments()
@@ -596,8 +583,7 @@ def main():
         if filepath_pretrain:
             print("Pretrain filepath provided. Starting pretrain optimization.")
             df_pretrain = load_data(filepath_pretrain)
-            df_train_pretrain, df_test_pretrain = train_test_split(df_pretrain,
-                                                                    test_size=0.2, random_state=42)
+            df_train_pretrain, df_test_pretrain = train_test_split(df_pretrain, test_size=0.2, random_state=42)
             best_params_pretrain, best_model_pretrain = optimize_vae(
                 df_train_pretrain,
                 df_test_pretrain,
@@ -605,11 +591,7 @@ def main():
                 save_pretrained_model=True,
                 save_filepath=filepath_save_pretrain,
             )
-            best_params_train, _ = optimize_vae(
-                df_train,
-                df_test,
-                "Train",
-                pretrained_model=best_model_pretrain)
+            best_params_train, _ = optimize_vae(df_train, df_test, "Train", pretrained_model=best_model_pretrain)
 
             (
                 n_epochs_pretrain,
