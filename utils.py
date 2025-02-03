@@ -1,18 +1,21 @@
-import numpy as np
-import pandas as pd
+"""Utils"""
 
+from ast import literal_eval
+import pandas as pd
+import numpy as np
 #import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from scipy.spatial import distance
-from sklearn.preprocessing import MinMaxScaler
-
 import torch
 from torch import nn
 
 # Set GPU device if available according to OS
 # Funzione per rilevare il dispositivo migliore
-def get_device():
+def get_device() -> torch.device:
+    """Set GPU device if available according to OS
+
+    Returns:
+        torch.device: device
+    """
     if torch.cuda.is_available():
         return torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -20,13 +23,21 @@ def get_device():
     else:
         return torch.device("cpu")
 
-device = get_device()
+device: torch.device = get_device()
 print(f"Using device: {device}")
 
 
 # Read and get best hyperparams from log session
 def get_hyperparams_from_log(log_file):
-    with open(log_file, 'r') as f:
+    """get_hyperparams_from_log
+
+    Args:
+        log_file (_type_): _description_
+
+    Returns:
+        dict: params
+    """
+    with open(log_file, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     params = {}
@@ -34,18 +45,31 @@ def get_hyperparams_from_log(log_file):
         if "Best VAE hyperparams" in line:
             # Get autoencoder's best hyperp fomr log
             params_str = line.split("Best VAE hyperparams: ")[1].split(" with")[0]
-            params_tuple = eval(params_str)
-            params['vae'] = {'n_epochs': params_tuple[0], 'learning_rate': params_tuple[1], 'weight_decay': params_tuple[2], 'n_layers': params_tuple[3], 'activation': params_tuple[4], 'beta': params_tuple[5]}
+            params_tuple = literal_eval(params_str)
+            params['vae'] = {'n_epochs': params_tuple[0], 'learning_rate': params_tuple[1],
+                              'weight_decay': params_tuple[2], 'n_layers': params_tuple[3],
+                              'activation': params_tuple[4], 'beta': params_tuple[5]}
         elif "Best RBF params" in line:
             # Get interpolator's best hyperp fomr log
             params_str = line.split("Best RBF params: ")[1].split(" with")[0]
-            params_tuple = eval(params_str)
-            params['rbf'] = {'smoothing': params_tuple[0], 'kernel': params_tuple[1], 'epsilon': params_tuple[2], 'degree': params_tuple[3]}
+            params_tuple = literal_eval(params_str)
+            params['rbf'] = {'smoothing': params_tuple[0],
+                              'kernel': params_tuple[1],
+                              'epsilon': params_tuple[2],
+                              'degree': params_tuple[3]}
 
     return params
 
 # Get activation function module from string
 def get_activation_function(activation_name):
+    """get_activation_function
+
+    Args:
+        activation_name (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     activation_functions = {
         'ReLU': nn.ReLU(),
         'LeakyReLU': nn.LeakyReLU(),
@@ -64,6 +88,13 @@ def get_activation_function(activation_name):
 #     return loss.item()
 
 def select_random_entries(input_csv, ouput_csv, n):
+    """select_random_entries
+
+    Args:
+        input_csv (_type_): _description_
+        ouput_csv (_type_): _description_
+        n (_type_): _description_
+    """
     df = pd.read_csv(input_csv)
     df['ID'] = range(1, len(df) + 1)
     df.to_csv(input_csv, index=False)
@@ -73,6 +104,13 @@ def select_random_entries(input_csv, ouput_csv, n):
 
 
 def plot_reconstruction_error(original_data, reduced_data, reconstructed_data):
+    """PLOT RECONSTRUCTION ERROR
+
+    Args:
+        original_data (_type_): _description_
+        reduced_data (_type_): _description_
+        reconstructed_data (_type_): _description_
+    """
     reconstruction_error = np.mean(np.square(original_data - reconstructed_data), axis=1)
     average_error = np.mean(reconstruction_error)
     print(average_error)
@@ -82,7 +120,9 @@ def plot_reconstruction_error(original_data, reduced_data, reconstructed_data):
 
     # Crea un grafico a dispersione 3D dell'errore di ricostruzione
     fig = go.Figure(data=[go.Scatter3d(x=x, y=y, z=z, mode='markers',
-                                   marker=dict(size=5, color=reconstruction_error, colorscale='Viridis'))])
+                                   marker=dict(size=5,
+                                                color=reconstruction_error,
+                                                  colorscale='Viridis'))])
 
     fig.update_layout(title='3D Scatter Plot of Reconstruction Error',
                   scene=dict(xaxis_title='X',

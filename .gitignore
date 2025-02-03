@@ -13,3 +13,5 @@ random_selection.py
 test.py
 adaptive_std.py
 Backups/*
+dist/*
+build/*

@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from torch import nn, optim
-from torchviz import make_dot
+# from torchviz import make_dot
 from utils import get_device
 
 
@@ -102,10 +102,10 @@ class VectorReducer:
         reconstructed_data = decoded.detach().cpu().numpy()
         return reduced_data, reconstructed_data
     
-    def visualize_model(self):
-        x = torch.randn(1, self.df.shape[1]).to(self.device)
-        mu, _, _ = self.model(x)
-        return make_dot(mu, params=dict(self.model.named_parameters()))
+    # def visualize_model(self):
+    #     x = torch.randn(1, self.df.shape[1]).to(self.device)
+    #     mu, _, _ = self.model(x)
+    #     return make_dot(mu, params=dict(self.model.named_parameters()))
     
     def move_to_cpu(self):
         #Move the model to CPU. This method centralizes the logic for device handling
