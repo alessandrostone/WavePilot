@@ -1,0 +1,49 @@
+name: Check Commit
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+
+env:
+  GITHUB_SHA: ${{ github.sha }}
+  GITHUB_REF: ${{ github.ref }}
+  # IMAGE: europe-west6-docker.pkg.dev/emonitor-engineering-328215/melon-translate/melon-translate:latest
+  # REGISTRY_HOSTNAME: europe-west6-docker.pkg.dev
+  # USE_TESTING_DB: 1
+
+concurrency:
+  group: check-commit-${{ github.event.repository.name }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-commit:
+    if: github.event.pull_request.merged == false
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure System and Project
+        run: |
+          poetry install
+      - name: "Check PyTest - Unit"
+        run: |
+          poetry run pytest | tee pytest-coverage.txt
+      - name: Pytest coverage comment
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-coverage-path: ./pytest-coverage.txt
+          pytest-xml-coverage-path: ./coverage.xml
+          junitxml-path: ./pytest.xml
+          title: Test Coverage
+          badge-title: Coverage
+          hide-badge: false
+          hide-report: false
+          create-new-comment: true
+          hide-comment: false
+          report-only-changed-files: false
+          remove-link-from-badge: false
+          unique-id-for-comment: python3.8
+          junitxml-title: JUnit Tests Xml Coverage Summary 
