@@ -1,12 +1,14 @@
-"""Utils"""
-
-from ast import literal_eval
-import pandas as pd
+import ast
+import json
 import numpy as np
-#import plotly.express as px
+import pandas as pd
 import plotly.graph_objects as go
 import torch
+
+from logger import setup_logger
 from torch import nn
+
+logging = setup_logger('Utils Logger')
 
 # Set GPU device if available according to OS
 # Funzione per rilevare il dispositivo migliore
@@ -27,38 +29,57 @@ device: torch.device = get_device()
 print(f"Using device: {device}")
 
 
-# Read and get best hyperparams from log session
+def load_osc_addresses(file_path):
+
+    try:
+        with open(file_path, 'r') as f:
+            addresses = json.load(f)
+        logging.info(f"Loaded {len(addresses)} OSC addresses from {file_path}")
+        return addresses
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path}")
+    except json.JSONDecodeError:
+        logging.error(f"Error decoding JSON file: {file_path}")
+    except Exception as e:
+        logging.error(f"Unexpected error loading OSC addresses: {e}")
+    return []
+
+
 def get_hyperparams_from_log(log_file):
-    """get_hyperparams_from_log
-
-    Args:
-        log_file (_type_): _description_
-
-    Returns:
-        dict: params
-    """
-    with open(log_file, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
 
     params = {}
-    for line in lines:
-        if "Best VAE hyperparams" in line:
-            # Get autoencoder's best hyperp fomr log
-            params_str = line.split("Best VAE hyperparams: ")[1].split(" with")[0]
-            params_tuple = literal_eval(params_str)
-            params['vae'] = {'n_epochs': params_tuple[0], 'learning_rate': params_tuple[1],
-                              'weight_decay': params_tuple[2], 'n_layers': params_tuple[3],
-                              'activation': params_tuple[4], 'beta': params_tuple[5]}
-        elif "Best RBF params" in line:
-            # Get interpolator's best hyperp fomr log
-            params_str = line.split("Best RBF params: ")[1].split(" with")[0]
-            params_tuple = literal_eval(params_str)
-            params['rbf'] = {'smoothing': params_tuple[0],
-                              'kernel': params_tuple[1],
-                              'epsilon': params_tuple[2],
-                              'degree': params_tuple[3]}
+
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+
+        for line in lines:
+            # Extract the best hyperparameters for the VAE
+            if "Best VAE hyperparams" in line:
+                try:
+                    params_str = line.split("Best VAE hyperparams: ")[1].split(" with")[0]
+                    params['vae'] = ast.literal_eval(params_str)
+                except (IndexError, SyntaxError, ValueError) as e:
+                    raise ValueError(f"Error processing VAE parameters from line: {line}. Details: {e}")
+
+            # Extract the best hyperparameters for the interpolator
+            elif "Best Interpolator params" in line:
+                try:
+                    params_str = line.split("Best Interpolator params: ")[1].split(" with")[0]
+                    params['rbf'] = ast.literal_eval(params_str)
+                except (IndexError, SyntaxError, ValueError) as e:
+                    raise ValueError(f"Error processing interpolator parameters from line: {line}. Details: {e}")
+
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"The specified log file does not exist: {log_file}. Details: {e}")
+    except IOError as e:
+        raise IOError(f"Error reading the log file: {log_file}. Details: {e}")
+
+    if not params:
+        raise ValueError("No parameters found in the log file.")
 
     return params
+
 
 # Get activation function module from string
 def get_activation_function(activation_name):
@@ -77,15 +98,6 @@ def get_activation_function(activation_name):
     }
     return activation_functions.get(activation_name, None)
 
-
-# # Compute loss for optimization
-# def compute_validation_error(model, criterion, val_data):
-#     with torch.no_grad():
-#         val_data = val_data.drop(['ID', 'PRESET_NAME'], axis=1)
-#         val_data = torch.tensor(val_data.values).float()
-#         _, output = model(val_data)
-#         loss = criterion(output, val_data)
-#     return loss.item()
 
 def select_random_entries(input_csv, ouput_csv, n):
     """select_random_entries
@@ -115,7 +127,7 @@ def plot_reconstruction_error(original_data, reduced_data, reconstructed_data):
     average_error = np.mean(reconstruction_error)
     print(average_error)
 
-    # Estrai le coordinate x, y, z dai dati ridotti
+    # Get x, y, z cohordinates from reduced data
     x, y, z = reduced_data.T
 
     # Crea un grafico a dispersione 3D dell'errore di ricostruzione

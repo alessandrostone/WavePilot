@@ -15,6 +15,7 @@ from scipy.interpolate import RBFInterpolator
 from scipy.spatial.distance import euclidean
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from utils import get_activation_function
 
 from data import DataLoader
 from logger import setup_logger
@@ -31,24 +32,19 @@ def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     # (Small) dataset of the presets to be reduced (Mandatory)
-    parser.add_argument(
-        "-f",
-        "--filepath",
-        dest="filepath",
-        type=str,
-        required=True,
-        help="Dataset of the presets to be reduced.",
-    )
-
-    parser.add_argument(
-        "-n",
-        "--num_entries",
-        dest="num_entries",
-        type=int,
-        default=None,
-        help="Number of random entries to select from the dataset.",
-    )
-
+    parser.add_argument('-f', '--filepath',
+                        dest='filepath',
+                        type=str,
+                        required=True,
+                        help='Dataset of the presets to be reduced.')
+    
+    parser.add_argument('-n', '--num_entries',
+                        dest='num_entries',
+                        type=int,
+                        required=True,
+                        default=None,
+                        help='Number of random entries to select from the dataset.')
+    
     # Large dataset of presets to pretrain the model (Optional)
     parser.add_argument(
         "-F",
@@ -91,8 +87,8 @@ def load_data(filepath, num_entries=None) -> DataFrame:
     df = loader.load_presets()
 
     if num_entries:
-        df = df.sample(n=num_entries, random_state=42)
-        log_progress.info("Randomly selected %d entries from the dataset", num_entries)
+        df = df[np.random.choice(df.shape[0], size=num_entries, replace=False)]
+        log_progress.info(f'Randomly selected {num_entries} entries from the dataset')
     else:
         log_progress.info("Using the entire dataset !")
 
@@ -118,9 +114,7 @@ def compute_validation_error(reducer, data):
         _type_: _description_
     """
     data_tensor = torch.tensor(data).float().to(reducer.device)
-    # print(f"Validation data device: {data_tensor.device}, Reducer device: {reducer.device}")
     with torch.no_grad():
-        # reducer.model.to(device)
         return reducer.compute_loss(data_tensor, compute_gradients=False)
 
 
@@ -270,11 +264,6 @@ def interpolate_and_validate(
             progress_queue.put(1)
             return float("inf"), params
 
-        # Train the interpolator
-        # original_data = df.values
-        # reduced_data, _ = reducer.vae()
-        # reduced_data = reduced_data[:, 1:]  # Exclude ID column if present
-
         interpolator = RBFInterpolator(
             reduced_data,
             original_data,
@@ -337,8 +326,8 @@ def interpolate_and_validate(
         # Handle any other exceptions
         log_progress.error("Unexpected error in interpolate_and_validate: %s", str(e), exc_info=True)
         progress_queue.put(1)
-        return float("inf"), params
-
+        return float('inf'), params
+    
 
 def optimize_vae(
     df_train,
@@ -498,7 +487,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
     progress_queue = manager.Queue()
     log_queue = manager.Queue()
 
-    log = setup_logger("InterpolatorLogger", log_queue=log_queue, file=True)
+    log = setup_logger('OptimizationLogger', log_queue=log_queue, file=True)
     listener_log = log_listener(log_queue, log.handlers)
 
     # Listener per il progresso
@@ -581,8 +570,6 @@ def main():
         else:
             df_train, df_test = df, df
 
-        original_data_train = df_train.values
-        original_data_test = df_test.values
 
         if filepath_pretrain:
             print("Pretrain filepath provided. Starting pretrain optimization.")
@@ -646,8 +633,7 @@ def main():
             reducer_train.train_vae(n_epochs_train)
 
         else:
-            print("Optimizing VAE parameters...")
-            best_params_train, _ = optimize_vae(original_data_train, original_data_test, "Train")
+            best_params_train, _ = optimize_vae(df_train, df_test, 'Train')
 
             n_epochs_train = best_params_train["num_epochs"]
             learning_rate_train = best_params_train["learning_rate"]
@@ -658,28 +644,15 @@ def main():
             kl_beta_train = best_params_train["kl_beta"]
             mse_beta_train = best_params_train["mse_beta"]
 
-            activation_train = utils.get_activation_function(activation_name_train)
+            activation_train = get_activation_function(activation_name_train)
+            reducer_train = VectorReducer(df_train, learning_rate_train, weight_decay_train, n_layers_train, layer_dim_train, activation_train, kl_beta_train, mse_beta_train)
 
-            reducer_train = VectorReducer(
-                original_data_train,
-                learning_rate_train,
-                weight_decay_train,
-                n_layers_train,
-                layer_dim_train,
-                activation_train,
-                kl_beta_train,
-                mse_beta_train,
-            )
-            print("VR called!")
             reducer_train.train_vae(n_epochs_train)
-            print("TV called!")
+        
             reduced_data, _ = reducer_train.vae()
-            # visualized_model = reducer_train.visualize_model()
-            # visualized_model.save("model_graph")
-            print(f"Reducer called! Shape: {reduced_data.shape}")
 
             print(f"Reduced data is on device: {reducer_train.device}")
-        # optimize_interpolator(original_data_train, reduced_data, 'Interpolator')
+        optimize_interpolator(df_train, reduced_data, 'Interpolator')
 
     except Exception as e:
         log_progress.error("Error in main: %s", str(e), exc_info=True)
