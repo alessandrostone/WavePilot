@@ -251,7 +251,10 @@ def interpolate_and_validate(
         # Ensure degree meets minimum requirements for certain kernels
         if kernel in min_degree and degree < min_degree[kernel]:
             log_progress.warning(
-                "Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)", kernel, degree
+                "Skipping configuration: kernel=%s, \
+                      degree=%d (below minimum degree requirement)",
+                kernel,
+                degree,
             )
             progress_queue.put(1)
             return float("inf"), params  # Invalid configuration
@@ -260,7 +263,7 @@ def interpolate_and_validate(
         num_poly_terms = 0 if degree == -1 else (degree + 1) * (degree + 2) // 2
         if original_data.shape[0] < num_poly_terms:
             log_progress.warning(
-                "Skipping configuration: insufficient dataset size for degree=%d " "(requires %d entries)",
+                "Skipping configuration: insufficient dataset size for degree=%d " + "(requires %d entries)",
                 degree,
                 num_poly_terms,
             )
@@ -290,7 +293,7 @@ def interpolate_and_validate(
 
         # Log progress
         log_progress.info(
-            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, " "epsilon=%f, validation_distance=%.4f",
+            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, " + "epsilon=%f, validation_distance=%.4f",
             kernel,
             degree,
             smoothing,
@@ -304,7 +307,8 @@ def interpolate_and_validate(
     except np.linalg.LinAlgError:
         # Handle singular matrix error
         log_progress.warning(
-            "Skipping configuration due to singular matrix error: " "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
+            "Skipping configuration due to singular matrix error: "
+            "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
             kernel,
             degree,
             smoothing,
@@ -672,7 +676,7 @@ def main():
             reduced_data, _ = reducer_train.vae()
             # visualized_model = reducer_train.visualize_model()
             # visualized_model.save("model_graph")
-            print("Reducer called!")
+            print(f"Reducer called! Shape: {reduced_data.shape}")
 
             print(f"Reduced data is on device: {reducer_train.device}")
         # optimize_interpolator(original_data_train, reduced_data, 'Interpolator')
@@ -680,9 +684,7 @@ def main():
     except Exception as e:
         log_progress.error("Error in main: %s", str(e), exc_info=True)
 
-
 if __name__ == "__main__":
-
     multiprocessing.freeze_support()  # Required for PyInstaller
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):

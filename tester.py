@@ -9,6 +9,8 @@ logger = setup_logger('Data loader')
 
 
 class DataLoader:
+    """DAtaLoader Class
+    """
     def __init__(self, filepath):
         """
         Initialize the DataLoader with the file path.

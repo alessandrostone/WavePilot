@@ -37,6 +37,14 @@ class VAE(nn.Module):
         self.decoder = nn.Sequential(*decoder_layers)
 
     def reparametrize(self, mu, logvar):
+        """
+        Functionality: Reparameterization trick used in Variational Autoencoder (VAE) model. 
+                       It transforms the latent variable Z by sampling from a distribution 
+                       that is defined as N(mu, exp(logvar)) and then decoding it back to get 
+                       the reconstructed input.
+        Input: mu, logvar : mean and logarithm of variance of the Gaussian distribution
+        Returns: A tensor representing the reparameterized Z which can be used for reconstruction.
+        """
         std = torch.exp(0.5 * logvar) # verificare
         eps = torch.randn_like(std)
         return mu + eps * std
