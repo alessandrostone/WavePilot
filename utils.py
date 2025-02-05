@@ -94,7 +94,9 @@ def get_activation_function(activation_name):
     activation_functions = {
         'ReLU': nn.ReLU(),
         'LeakyReLU': nn.LeakyReLU(),
-        'Sigmoid': nn.Sigmoid()
+        'Sigmoid': nn.Sigmoid(),
+        'ELU': nn.ELU(),
+        'GELU': nn.GELU()
     }
     return activation_functions.get(activation_name, None)
 

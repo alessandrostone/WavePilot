@@ -8,6 +8,9 @@ from logging import Logger
 from logging.handlers import QueueListener
 from multiprocessing import Manager, Pool, Process, cpu_count
 
+from logging.handlers import QueueListener
+from multiprocessing import Manager, Pool, Process, cpu_count
+
 import numpy as np
 from pandas import DataFrame
 import torch
@@ -15,13 +18,11 @@ from scipy.interpolate import RBFInterpolator
 from scipy.spatial.distance import euclidean
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-from utils import get_activation_function
 
 from data import DataLoader
 from logger import setup_logger
 from model import VectorReducer
-import utils
-
+from utils import get_activation_function
 
 def get_arguments() -> argparse.Namespace:
     """get args
@@ -88,10 +89,10 @@ def load_data(filepath, num_entries=None) -> DataFrame:
 
     if num_entries:
         df = df[np.random.choice(df.shape[0], size=num_entries, replace=False)]
-        log_progress.info(f'Randomly selected {num_entries} entries from the dataset')
+        log_progress.info("Randomly selected %d entries from the dataset", num_entries)
     else:
-        log_progress.info("Using the entire dataset !")
-
+        log_progress.info("Using the entire dataset!")
+    
     return df
 
 
@@ -200,12 +201,8 @@ def train_and_validate(queue, n_epochs, params, original_train, original_test, p
         return validation_error, params, reducer.model
 
     except Exception as e:
-        log_progress.error("Error during VAE optimization: %s", str(e), exc_info=True)
-        return (
-            float("inf"),
-            params,
-            None,
-        )  # Ritorna un valore alto per continuare l'ottimizzazione
+        log_progress.error("Error during VAE optimization: %s", e)
+        return float('inf'), params, None  # Ritorna un valore alto per continuare l'ottimizzazione
     finally:
         queue.put(1)  # Notify progress
 
@@ -244,23 +241,14 @@ def interpolate_and_validate(
 
         # Ensure degree meets minimum requirements for certain kernels
         if kernel in min_degree and degree < min_degree[kernel]:
-            log_progress.warning(
-                "Skipping configuration: kernel=%s, \
-                      degree=%d (below minimum degree requirement)",
-                kernel,
-                degree,
-            )
+            log_progress.warning("Skipping configuration: kernel=%s, degree=%d (below minimum degree requirement)", kernel, degree)
             progress_queue.put(1)
             return float("inf"), params  # Invalid configuration
 
         # Calculate the number of polynomial terms for the given degree
         num_poly_terms = 0 if degree == -1 else (degree + 1) * (degree + 2) // 2
         if original_data.shape[0] < num_poly_terms:
-            log_progress.warning(
-                "Skipping configuration: insufficient dataset size for degree=%d " + "(requires %d entries)",
-                degree,
-                num_poly_terms,
-            )
+            log_progress.warning("Skipping configuration: insufficient dataset size for degree=%d (requires %d entries)", degree, num_poly_terms)
             progress_queue.put(1)
             return float("inf"), params
 
@@ -281,42 +269,21 @@ def interpolate_and_validate(
         validation_distance = np.mean(distances)
 
         # Log progress
-        log_progress.info(
-            "Configuration validated: kernel=%s, degree=%d, smoothing=%f, " + "epsilon=%f, validation_distance=%.4f",
-            kernel,
-            degree,
-            smoothing,
-            epsilon,
-            validation_distance,
-        )
+        log_progress.info("Configuration validated: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f, validation_distance=%.5f", kernel, degree, smoothing, epsilon, validation_distance)
         progress_queue.put(1)
 
         return validation_distance, params
 
     except np.linalg.LinAlgError:
         # Handle singular matrix error
-        log_progress.warning(
-            "Skipping configuration due to singular matrix error: "
-            "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
-            kernel,
-            degree,
-            smoothing,
-            epsilon,
-        )
+        log_progress.warning("Skipping configuration due to singular matrix error: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f", kernel, degree, smoothing, epsilon)
         progress_queue.put(1)
         return float("inf"), params
 
     except ValueError as e:
         # Handle specific ValueError for minimum data points
         if "At least" in str(e):
-            log_progress.warning(
-                "Skipping configuration due to insufficient data points: "
-                "kernel=%s, degree=%d, smoothing=%f, epsilon=%f",
-                kernel,
-                degree,
-                smoothing,
-                epsilon,
-            )
+            log_progress.warning("Skipping configuration due to insufficient data points: kernel=%s, degree=%d, smoothing=%.5f, epsilon=%.5f", kernel, degree, smoothing, epsilon)
             progress_queue.put(1)
             return float("inf"), params
         else:
@@ -324,7 +291,7 @@ def interpolate_and_validate(
 
     except Exception as e:
         # Handle any other exceptions
-        log_progress.error("Unexpected error in interpolate_and_validate: %s", str(e), exc_info=True)
+        log_progress.error("Unexpected error in interpolate_and_validate: %s", e)
         progress_queue.put(1)
         return float('inf'), params
     
@@ -353,14 +320,14 @@ def optimize_vae(
     print("Optimizing VAE...")
     # VAE's params' grid
     vae_grid = {
-        "n_epochs": [50],
-        "learning_rate": np.logspace(-5, -2, num=3),
-        "weight_decay": np.logspace(-5, -2, num=3),
-        "n_layers": list(range(1, 2)),
-        "layer_dim": [128],
-        "activation": ["ReLU", "LeakyReLU"],
-        "kl_beta": np.linspace(0.05, 0.5, num=2),
-        "mse_beta": np.linspace(0.3, 1.0, num=2),
+        'n_epochs': [25, 50, 100, 200],
+        'learning_rate': np.logspace(-6, -2, num=5),
+        'weight_decay': np.logspace(-6, -2, num=5),
+        'n_layers': list(range(1, 4)),
+        'layer_dim': [64, 128, 256],
+        'activation': ['ReLU', 'LeakyReLU', 'ELU', 'GELU'],
+        'kl_beta': np.linspace(0.01, 1.0, num=5),
+        'mse_beta': np.linspace(0.1, 2.0, num=5)
     }
 
     # Get all combinations of hyperparameters
@@ -380,6 +347,7 @@ def optimize_vae(
     listener_process.start()
 
     try:
+        log_progress.info("%s Starting VAE optimization...", log_prefix)
         log_progress.info("%s Starting VAE optimization...", log_prefix)
 
         input_data = [
@@ -412,9 +380,7 @@ def optimize_vae(
                 "mse_beta": params[6],
             }
 
-            log_progress.info(
-                "%s Validation Error: %.4f | Params: %s", log_prefix, float(validation_error), str(params)
-            )
+            log_progress.info("%s Validation Error: %.5f | Params: %s", log_prefix, validation_error, params)
 
             if validation_error < best_validation_error:
                 best_validation_error = validation_error
@@ -422,7 +388,7 @@ def optimize_vae(
                 best_model = model
 
     except Exception as e:
-        log_progress.error("%s Error during optimization: %s", log_prefix, str(e), exc_info=True)
+        log_progress.error("%s Error during optimization: %s", log_prefix, e)
         raise
 
     finally:
@@ -431,7 +397,7 @@ def optimize_vae(
         log_queue.put(None)
         listener_log.stop()
 
-    log.info("Best VAE hyperparams: %s with a validation error of %f", best_params, best_validation_error)
+    log.info("Best VAE hyperparams: %s with a validation error of %.5f", best_params, best_validation_error)
 
     if save_pretrained_model:
         torch.save(best_model, f"{save_filepath}.pt")
@@ -524,14 +490,14 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
                 "degree": params[3],
             }
 
-            log_progress.info("%s Validation Distance: %.4f | Params: %s", log_prefix, validation_distance, param_dict)
+            log_progress.info("%s Validation Distance: %.5f | Params: %s", log_prefix, validation_distance, param_dict)
 
             if validation_distance < best_validation_distance:
                 best_validation_distance = validation_distance
                 best_params = param_dict
 
     except Exception as e:
-        log_progress.error("Unexpected error in interpolate_and_validate: %s", str(e), exc_info=True)
+        log_progress.error("%s Error during interpolator optimization: %s", log_prefix, e)
         raise
 
     finally:
@@ -540,12 +506,7 @@ def optimize_interpolator(original_data, reduced_data, log_prefix):
         log_queue.put(None)
         listener_log.stop()
 
-    log.info(
-        "%s Best Interpolator params: %s with a validation distance of %.4f",
-        log_prefix,
-        best_params,
-        best_validation_distance,
-    )
+    log.info("%s Best Interpolator params: %s with a validation distance of %.5f", log_prefix, best_params, best_validation_distance)
 
     return best_params
 
@@ -652,10 +613,10 @@ def main():
             reduced_data, _ = reducer_train.vae()
 
             print(f"Reduced data is on device: {reducer_train.device}")
-        optimize_interpolator(df_train, reduced_data, 'Interpolator')
+            optimize_interpolator(df_train, reduced_data, 'Interpolator')
 
     except Exception as e:
-        log_progress.error("Error in main: %s", str(e), exc_info=True)
+        log_progress.error("Error in main: %s", e)
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # Required for PyInstaller
@@ -665,3 +626,5 @@ if __name__ == "__main__":
     else:
         print("Running in a normal Python process")
     main()
+
+# num_entries = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, n/2]
