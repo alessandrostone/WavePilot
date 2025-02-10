@@ -17,6 +17,9 @@ from model import VectorReducer
 from utils import get_activation_function
 
 
+RANDOM_SEED = 579
+
+
 def get_arguments():
     parser = argparse.ArgumentParser()
 
@@ -64,8 +67,12 @@ def load_data(filepath, num_entries=None):
     df = loader.load_presets()
 
     if num_entries:
-        df = df[np.random.choice(df.shape[0], size=num_entries, replace=False)]
+        np.random.seed(RANDOM_SEED)
+        selected_idx = np.random.choice(df.shape[0], size=num_entries, replace=False)
+        df = df[selected_idx]
+        #df = df[np.random.choice(df.shape[0], size=num_entries, replace=False)]
         log_progress.info("Randomly selected %d entries from the dataset", num_entries)
+        log_progress.info("Selected indices from dataset: %s", selected_idx)
     else:
         log_progress.info("Using the entire dataset!")
     
@@ -207,7 +214,7 @@ def optimize_vae(df_train, df_test, log_prefix, save_pretrained_model=False, sav
     
     #VAE's params' grid
     vae_grid = {
-        'n_epochs': [25, 50, 100, 200],
+        'n_epochs': [50, 100, 200],
         'learning_rate': np.logspace(-6, -2, num=5),
         'weight_decay': np.logspace(-6, -2, num=5),
         'n_layers': list(range(1, 4)),
@@ -404,6 +411,7 @@ def main():
             pretrained_model = torch.load(f'{filepath_save_pretrain}.pt')
             reducer_train = VectorReducer(df, learning_rate_train, weight_decay_train, n_layers_train, layer_dim_train, activation_train, kl_beta_train, mse_beta_train, pretrained_model=pretrained_model)
             reducer_train.train_vae(n_epochs_train)
+            reduced_data, reconstructed_data = reducer_train.vae()
 
         else:
             best_params_train, _ = optimize_vae(df_train, df_test, 'Train')
@@ -422,10 +430,11 @@ def main():
 
             reducer_train.train_vae(n_epochs_train)
         
-            reduced_data, _ = reducer_train.vae()
+            reduced_data, reconstructed_data = reducer_train.vae()
 
-            print(f"Reduced data is on device: {reducer_train.device}")
-            optimize_interpolator(df_train, reduced_data, 'Interpolator')
+            #print(f"Reduced data is on device: {reducer_train.device}")
+        
+        optimize_interpolator(reconstructed_data, reduced_data, 'Interpolator')
 
     except Exception as e:
         log_progress.error("Error in main: %s", e)
