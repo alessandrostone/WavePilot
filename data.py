@@ -14,9 +14,10 @@ class DataLoader:
     def load_presets(self):
         """
         Load the dataset from a CSV file, remove non-numeric columns,
-        columns with all NaN values, and the 'ID' column.
+        columns with all NaN values, and the 'ID' column;
+        Convert Pandas' Dataframe to array.
         
-        :return: A cleaned Pandas DataFrame.
+        :return: a cleaned numpy.array.
         """
         _, file_extension = os.path.splitext(self.filepath)
 

@@ -91,8 +91,8 @@ class VectorReducer:
 
     def vae(self):
         device = next(self.model.parameters()).device
-        print(f"Model is on device: {device}")
-        print(f"Input data is on device: {self.df.device}")
+        #print(f"Model is on device: {device}")
+        #print(f"Input data is on device: {self.df.device}")
         with torch.no_grad(): # no need to calculate gradients during evaluation
             mu, _, decoded = self.model(self.df.to(device))
         reduced_data = mu.detach().cpu().numpy()
