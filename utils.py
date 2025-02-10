@@ -1,12 +1,13 @@
 import ast
 import json
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import torch
+from torch import nn
 
 from logger import setup_logger
-from torch import nn
 
 logging = setup_logger('Utils Logger')
 
