@@ -393,23 +393,57 @@ class WavePilotBridgeExecutable:
 
 def main():
     """Main entry point"""
+    # Check for JUCE ChildProcessWorker initialization first
+    if len(sys.argv) > 1:
+        # Try JUCE ChildProcessWorker initialization
+        try:
+            from wavepilot_worker import WavePilotWorker
+
+            # Look for JUCE child process arguments or explicit worker flag
+            command_line = " ".join(sys.argv[1:])
+
+            # JUCE ChildProcessWorker uses specific argument patterns
+            if any(arg.startswith(("--juce-child-process", "--child-process")) for arg in sys.argv) or "--worker" in sys.argv:
+                print("INFO: Starting as JUCE ChildProcessWorker", file=sys.stderr)
+                worker = WavePilotWorker()
+                worker.run()
+                return
+
+        except ImportError:
+            pass  # Fall back to original interface
+
+    # Original command-line interface
     parser = argparse.ArgumentParser(description="WavePilot Bridge Executable")
-    parser.add_argument("--interactive", "-i", action="store_true", 
+    parser.add_argument("--interactive", "-i", action="store_true",
                        help="Run in interactive mode (read commands from stdin)")
     parser.add_argument("--command", "-c", type=str,
                        help="Execute a single JSON command and exit")
     parser.add_argument("--version", "-v", action="store_true",
                        help="Print version information")
-    
+    parser.add_argument("--worker", "-w", action="store_true",
+                       help="Run as JUCE ChildProcessWorker (binary message mode)")
+
     args = parser.parse_args()
-    
+
     if args.version:
-        print("WavePilot Bridge Executable v1.0")
+        print("WavePilot Bridge Executable v2.0")
         return
-    
-    # Create bridge executable instance
+
+    if args.worker:
+        # JUCE ChildProcessWorker mode
+        try:
+            from wavepilot_worker import WavePilotWorker
+            print("INFO: Starting as JUCE ChildProcessWorker", file=sys.stderr)
+            worker = WavePilotWorker()
+            worker.run()
+        except ImportError as e:
+            print(f"ERROR: Failed to import worker module: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Original JSON command interface
     bridge_exe = WavePilotBridgeExecutable()
-    
+
     try:
         if args.command:
             # Single command mode
@@ -418,9 +452,9 @@ def main():
             # Interactive mode (default)
             bridge_exe.run_interactive_mode()
         else:
-            print("Error: No command specified. Use --interactive or --command", file=sys.stderr)
+            print("Error: No command specified. Use --interactive, --command, or --worker", file=sys.stderr)
             sys.exit(1)
-            
+
     except Exception as e:
         print(f"Fatal error: {e}", file=sys.stderr)
         traceback.print_exc()
