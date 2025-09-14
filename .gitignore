@@ -11,5 +11,5 @@ output/*
 Backups/*
 legacy/*
 checkpoints/*
-
-
+build/*
+dist/*

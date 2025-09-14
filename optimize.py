@@ -34,8 +34,8 @@ from utils import set_global_seeds, space_fingerprint, LatentScaler  # external 
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-log = setup_logger('OptimizationLogger', file=True)
-log_progress = setup_logger('ProgressLogger', file=False)
+log = setup_logger('OptimizationLogger')
+log_progress = setup_logger('ProgressLogger')
 
 
 # -----------------------------
