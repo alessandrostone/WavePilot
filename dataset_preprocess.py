@@ -17,31 +17,57 @@ logging = setup_logger("Dataset preprocessor")
 
 
 def get_arguments():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="WavePilot Dataset Preprocessor - Analyze and preprocess preset datasets for machine learning",
+        epilog="""
+Examples:
+  # Basic preprocessing with output file
+  python dataset_preprocess.py -f presets.csv -o preprocessed.csv
 
-    parser.add_argument("-f", "--filepath", 
-                        dest="filepath", 
-                        type=str, 
-                        required=True, 
-                        help="Input dataset to preprocess.")
+  # Drop specific columns and round to 3 decimal places
+  python dataset_preprocess.py -f presets.csv -o preprocessed.csv -c cutoff resonance -d 3
 
-    parser.add_argument("-o", "--output", 
-                        dest="output", 
-                        type=str, 
-                        default=None, 
-                        help="Output filepath for preprocessed dataset.")
+  # Analyze dataset without saving (visualization only)
+  python dataset_preprocess.py -f presets.csv
 
-    parser.add_argument("-c", "--columns_to_drop", 
-                        dest="columns_to_drop", 
-                        nargs="*", 
-                        default=[], 
-                        help="List of columns to drop.")
+The script performs:
+  - Duplicate removal
+  - Constant column detection
+  - Low-variance feature identification
+  - Correlation analysis
+  - PCA dimensionality analysis
+  - Generates visualizations (correlation heatmap, boxplots, variance plots)
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument("-f", "--filepath",
+                        dest="filepath",
+                        type=str,
+                        required=True,
+                        metavar="PATH",
+                        help="Path to input dataset CSV file (required)")
+
+    parser.add_argument("-o", "--output",
+                        dest="output",
+                        type=str,
+                        default=None,
+                        metavar="PATH",
+                        help="Output filepath for preprocessed dataset (optional, skips save if not specified)")
+
+    parser.add_argument("-c", "--columns_to_drop",
+                        dest="columns_to_drop",
+                        nargs="*",
+                        default=[],
+                        metavar="COL",
+                        help="Space-separated list of column names to drop (e.g., -c cutoff resonance volume)")
 
     parser.add_argument("-d", "--decimal_places",
                         dest="decimal_places",
                         type=int,
                         default=DECIMAL_PLACES,
-                        help="Number of decimal places to round numerical values.")
+                        metavar="N",
+                        help=f"Number of decimal places to round numerical values (default: {DECIMAL_PLACES})")
 
     return parser.parse_args()
 
@@ -104,11 +130,18 @@ class DatasetPreprocessor:
         """
         # Select numerical columns only
         numeric_data = self.df.select_dtypes(include='number')
-    
+
         # Auto-detect component count if not specified
+        # n_components must be <= min(n_samples, n_features)
         if n_components is None:
-            n_components = numeric_data.shape[1]
-    
+            n_components = min(numeric_data.shape[0], numeric_data.shape[1])
+
+        # Ensure n_components doesn't exceed the valid range
+        max_components = min(numeric_data.shape[0], numeric_data.shape[1])
+        if n_components > max_components:
+            logging.warning(f"n_components={n_components} exceeds maximum of {max_components}. Using {max_components} instead.")
+            n_components = max_components
+
         # Initialize and train PCA
         pca = PCA(n_components=n_components)
         pca.fit(numeric_data)

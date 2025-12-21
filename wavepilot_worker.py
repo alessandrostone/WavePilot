@@ -10,6 +10,7 @@ import sys
 import struct
 import json
 import traceback
+import threading
 from pathlib import Path
 
 # Add current directory to path for imports
@@ -37,6 +38,8 @@ class WavePilotWorker:
         self.logger = setup_logger("WavePilot Worker")
         self.bridge = WavePilotBridge()
         self.initialized = False
+        self.training_thread = None
+        self.training_cancelled = False
 
     def send_message_to_coordinator(self, data):
         """Send a binary message to the coordinator process"""
@@ -124,6 +127,10 @@ class WavePilotWorker:
                 self.handle_get_parameter_count(params, request_id)
             elif command == "get_latent_bounds":
                 self.handle_get_latent_bounds(params, request_id)
+            elif command == "run_pipeline":
+                self.handle_run_pipeline(message, request_id)
+            elif command == "cancel_training":
+                self.handle_cancel_training(params, request_id)
             else:
                 self.send_error(f"Unknown command: {command}", request_id)
 
@@ -159,8 +166,7 @@ class WavePilotWorker:
                 "supported_commands": [
                     "initialize", "encode", "decode", "interpolate",
                     "get_parameter_count", "get_latent_bounds",
-                    "load_optimization_data", "optimize_vae", "optimize_rbf",
-                    "optimize_full_pipeline", "run_training_with_params", "get_info"
+                    "run_pipeline", "cancel_training", "get_info"
                 ]
             }
             self.send_success(info, request_id)
@@ -257,6 +263,108 @@ class WavePilotWorker:
             self.send_success({"latent_bounds": bounds}, request_id)
         except Exception as e:
             self.send_error(f"Get latent bounds error: {str(e)}", request_id)
+
+    def handle_run_pipeline(self, message, request_id=None):
+        """Handle training pipeline request - runs in background thread"""
+        try:
+            # Read flat properties from message (ValueTree serialization doesn't nest)
+            input_csv = message.get("input_csv")
+            output_json = message.get("output_json")
+            vae_trials = message.get("vae_trials", 100)
+            rbf_trials = message.get("rbf_trials", 50)
+
+            if not input_csv:
+                self.send_error("Missing input_csv parameter", request_id)
+                return
+
+            # Generate output path if not provided
+            if not output_json:
+                output_json = str(Path(input_csv).with_suffix('.json'))
+
+            self.logger.info(f"Starting training pipeline: {input_csv} -> {output_json}")
+
+            # Send acknowledgement that training has started
+            self.send_message_to_coordinator({
+                "type": "training_started",
+                "input_csv": input_csv,
+                "output_json": output_json,
+                "request_id": request_id
+            })
+
+            # Run training in background thread
+            self.training_cancelled = False
+            self.training_thread = threading.Thread(
+                target=self._run_pipeline_thread,
+                args=(input_csv, output_json, vae_trials, rbf_trials, request_id)
+            )
+            self.training_thread.start()
+
+        except Exception as e:
+            self.send_error(f"Run pipeline error: {str(e)}", request_id)
+
+    def _run_pipeline_thread(self, input_csv, output_json, vae_trials, rbf_trials, request_id):
+        """Background thread for running the training pipeline"""
+        try:
+            # Import pipeline module
+            from pipeline import run_pipeline
+
+            # Create a progress callback that sends updates to coordinator
+            def progress_callback(phase, progress, message):
+                if self.training_cancelled:
+                    raise InterruptedError("Training cancelled by user")
+
+                self.send_message_to_coordinator({
+                    "type": "training_progress",
+                    "phase": phase,
+                    "progress": progress,
+                    "message": message,
+                    "request_id": request_id
+                })
+
+            # Run the pipeline
+            self.logger.info(f"Running pipeline with {vae_trials} VAE trials, {rbf_trials} RBF trials")
+
+            run_pipeline(
+                input_csv=input_csv,
+                output_json=output_json,
+                vae_trials=vae_trials,
+                rbf_trials=rbf_trials
+            )
+
+            # Send completion notification
+            self.send_message_to_coordinator({
+                "type": "training_complete",
+                "success": True,
+                "output_json": output_json,
+                "request_id": request_id
+            })
+            self.logger.info(f"Training completed successfully: {output_json}")
+
+        except InterruptedError as e:
+            self.send_message_to_coordinator({
+                "type": "training_cancelled",
+                "message": str(e),
+                "request_id": request_id
+            })
+            self.logger.info("Training cancelled")
+
+        except Exception as e:
+            error_msg = f"Training failed: {str(e)}"
+            self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            self.send_message_to_coordinator({
+                "type": "training_error",
+                "error": error_msg,
+                "request_id": request_id
+            })
+
+    def handle_cancel_training(self, params, request_id=None):
+        """Handle training cancellation request"""
+        try:
+            self.training_cancelled = True
+            self.send_success({"cancelled": True}, request_id)
+            self.logger.info("Training cancellation requested")
+        except Exception as e:
+            self.send_error(f"Cancel training error: {str(e)}", request_id)
 
     def run(self):
         """Main worker loop - read messages from coordinator and respond"""

@@ -1,7 +1,7 @@
 # ==============================
 # General / I/O / Logging
 # ==============================
-LOG_FOLDER = "./logs"
+LOG_FOLDER = "/tmp/wavepilot_logs"
 CHECKPOINTS_FOLDER = "./checkpoints"
 CHECKPOINT_EXTENSION = ".pt"
 
@@ -39,7 +39,8 @@ PCA_VARIANCE_THRESHOLD = 0.95
 # ==============================
 # Latent constraints used by assertions
 MIN_LATENT_DIM = 2
-MAX_LATENT_DIM = 4
+MAX_LATENT_DIM = 3
+
 
 # Normalised data range
 DATA_MIN = 0.0
@@ -96,7 +97,7 @@ VAE_PARAM_RANGES = {
     },
     "latent_dim": {
         "type": "categorical",
-        "values": [2, 3, 4]
+        "values": [2, 3]
     },
     "width_scale": {
         "type": "float",
@@ -123,28 +124,13 @@ VAE_PARAM_RANGES = {
 # RBF hyperparameter search space
 # ==============================
 RBF_PARAM_RANGES = {
-    "smoothing": {
-        "type": "float",
-        "low": 1e-12,
-        "high": 1e-5,
-        "log": True
-    },
+    "smoothing": {"type": "float", "low": 1e-8, "high": 1e-3, "log": True},
     "kernel": {
         "type": "categorical",
-        "values": ["gaussian", "thin_plate_spline", "cubic", "inverse_quadratic", "linear"]
+        "values": ["gaussian", "thin_plate_spline", "cubic", "inverse_quadratic", "linear"],
     },
-    "epsilon_scale": {
-        "type": "float",
-        "low": 0.5,
-        "high": 3.0,
-        "log": False
-    },
-    "degree": {
-        "type": "int",
-        "low": -1,
-        "high": 1,
-        "log": False
-    }
+    "epsilon_scale": {"type": "float", "low": 0.5, "high": 3.0, "log": False},
+    "degree": {"type": "int", "low": -1, "high": 1, "log": False},
 }
 
 # Restrictions and kernel rules

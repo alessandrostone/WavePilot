@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import sys
+with open("/tmp/wavepilot_log.txt", "a") as f:
+    f.write(f"--- WavePilot Log ---\nWavePilot script started with args: {' '.join(sys.argv)}\n")
+
 """
 WavePilot Bridge Executable Main
 
@@ -6,21 +10,45 @@ This is the main entry point for the standalone WavePilot executable.
 It provides a simplified interface for C++ integration via subprocess communication.
 """
 
-import sys
-import json
-import argparse
-import traceback
-from pathlib import Path
-
-# Add current directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-
 try:
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Attempting to import modules...\n")
+    
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing json\n")
+    import json
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing argparse\n")
+    import argparse
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing traceback\n")
+    import traceback
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing pathlib\n")
+    from pathlib import Path
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing socket\n")
+    import socket
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing io\n")
+    import io
+
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Adding to sys.path\n")
+    sys.path.insert(0, str(Path(__file__).parent))
+    
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing wavepilot_bridge\n")
     from wavepilot_bridge import WavePilotBridge
+    with open("/tmp/wavepilot_log.txt", "a") as f: f.write("Importing logger\n")
     from logger import setup_logger
+
+    with open("/tmp/wavepilot_log.txt", "a") as f:
+        f.write("Module imports successful.\n")
+
 except ImportError as e:
+    with open("/tmp/wavepilot_log.txt", "a") as f:
+        f.write(f"FATAL: ImportError: {e}\n")
     print(f"ERROR: Failed to import required modules: {e}", file=sys.stderr)
     sys.exit(1)
+except Exception as e:
+    with open("/tmp/wavepilot_log.txt", "a") as f:
+        f.write(f"FATAL: An unexpected error occurred during import: {e}\n")
+    print(f"An unexpected error occurred during import: {e}", file=sys.stderr)
+    sys.exit(1)
+
+
 
 
 class WavePilotBridgeExecutable:
@@ -391,6 +419,58 @@ class WavePilotBridgeExecutable:
         self.process_command(command_json)
 
 
+def run_socket_server(port=50007):
+    """
+    Runs a TCP socket server to handle commands from the JUCE plugin.
+    """
+    bridge_exe = WavePilotBridgeExecutable()
+    
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError as e:
+            print(f"ERROR: Could not bind to port {port}: {e}", file=sys.stderr)
+            sys.exit(1)
+            
+        sock.listen(1)
+        print(f"WavePilot socket server ready on port {port}", flush=True, file=sys.stderr)
+        
+        keep_server_running = True
+        while keep_server_running:
+            conn, addr = sock.accept()
+            with conn:
+                data = b""
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    if b'\n' in data:
+                        break
+                
+                if not data:
+                    continue
+
+                command_json = data.decode("utf-8").strip()
+                if not command_json:
+                    continue
+
+                old_stdout = sys.stdout
+                redirected_output = io.StringIO()
+                sys.stdout = redirected_output
+                
+                if not bridge_exe.process_command(command_json):
+                    keep_server_running = False
+                
+                sys.stdout = old_stdout
+                
+                response_str = redirected_output.getvalue()
+                
+                if not response_str.endswith('\n'):
+                    response_str += '\n'
+                    
+                conn.sendall(response_str.encode("utf-8"))
+
 def main():
     """Main entry point"""
     # Check for JUCE ChildProcessWorker initialization first
@@ -422,11 +502,18 @@ def main():
                        help="Print version information")
     parser.add_argument("--worker", "-w", action="store_true",
                        help="Run as JUCE ChildProcessWorker (binary message mode)")
+    parser.add_argument("--socket-server", action="store_true", help="Run in socket server mode")
+    parser.add_argument("--port", type=int, default=50007, help="Port for socket server mode")
+
 
     args = parser.parse_args()
 
     if args.version:
         print("WavePilot Bridge Executable v2.0")
+        return
+
+    if args.socket_server:
+        run_socket_server(args.port)
         return
 
     if args.worker:

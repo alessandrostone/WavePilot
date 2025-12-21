@@ -111,16 +111,18 @@ class DataLoader:
 
     def _extract_preset_names(self, df: pd.DataFrame):
         """
-        Extract preset names from a 'name' column (case-insensitive).
+        Extract preset names from a 'name' or 'preset_name' column (case-insensitive).
         Empty/NaN values are replaced with progressive IDs.
         If no 'name' column exists, return progressive IDs for all rows.
         """
-        # Find a column named 'name' (case-insensitive)
+        # Find a column named 'name' or 'preset_name' (case-insensitive)
         name_col = None
         for col in df.columns:
-            if isinstance(col, str) and col.lower().strip() == "name":
-                name_col = col
-                break
+            if isinstance(col, str):
+                col_normalized = col.lower().strip()
+                if col_normalized in ("name", "preset_name"):
+                    name_col = col
+                    break
 
         n_rows = len(df)
         ids = [f"ID{i+1}" for i in range(n_rows)]

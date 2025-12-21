@@ -119,7 +119,7 @@ def load_model(
                         - "bundle": { "scaler": {...}, "median_dist": ..., "Z_std": ..., "original_data": ...,
                                       "has_interpolator": bool, "interpolator": obj|None }
     """
-    ckpt = torch.load(filepath, map_location=map_location or torch.device("cpu"))
+    ckpt = torch.load(filepath, map_location=map_location or torch.device("cpu"), weights_only=False)
 
     # Basic integrity checks
     _assert_key(ckpt, "version")

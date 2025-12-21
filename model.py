@@ -14,17 +14,31 @@ from tqdm import tqdm
 from utils import to_tensor, compute_hidden_dims, get_device
 
 from constants import (
-    MIN_LATENT_DIM, MAX_LATENT_DIM, DATA_MIN, DATA_MAX, DECIMAL_PLACES,
-    DEFAULT_KL_BETA, DEFAULT_LEARNING_RATE, DEFAULT_INPUT_NOISE_STD, FINAL_EPOCHS,
-    HIDDEN_WIDTH_SCALE_DEFAULT, HIDDEN_DEPTH_DEFAULT, HIDDEN_ROUND_TO_DEFAULT,
-    PRUNE_ENABLED_DEFAULT, PRUNE_EVERY_EPOCHS, BEST_IMPROVEMENT_EPS,
-    DEFAULT_BATCH_SIZE, GRAD_CLIP_DEFAULT, PER_FEATURE_WEIGHT_MIN,
-    RECON_ACCURACY_THRESHOLD
+    MIN_LATENT_DIM,
+    MAX_LATENT_DIM,
+    DATA_MIN,
+    DATA_MAX,
+    DECIMAL_PLACES,
+    DEFAULT_KL_BETA,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_INPUT_NOISE_STD,
+    FINAL_EPOCHS,
+    HIDDEN_WIDTH_SCALE_DEFAULT,
+    HIDDEN_DEPTH_DEFAULT,
+    HIDDEN_ROUND_TO_DEFAULT,
+    PRUNE_ENABLED_DEFAULT,
+    PRUNE_EVERY_EPOCHS,
+    BEST_IMPROVEMENT_EPS,
+    DEFAULT_BATCH_SIZE,
+    GRAD_CLIP_DEFAULT,
+    PER_FEATURE_WEIGHT_MIN,
+    RECON_ACCURACY_THRESHOLD,
 )
 
 # ============================================================
 # VAE deterministico per massima ricostruzione (overfitting)
 # ============================================================
+
 
 class DeterministicVAE(nn.Module):
     """
@@ -41,9 +55,9 @@ class DeterministicVAE(nn.Module):
         input_dim: int,
         latent_dim: int = 3,
         hidden_dims: Optional[List[int]] = None,
-        kl_beta: float = DEFAULT_KL_BETA,              # ~0: do not penalize "memorization" capacity
-        deterministic: bool = True,        # z = mu during both training and evaluation
-        input_noise_std: float = DEFAULT_INPUT_NOISE_STD,      # keep 0 by default to avoid hurting reconstruction
+        kl_beta: float = DEFAULT_KL_BETA,  # ~0: do not penalize "memorization" capacity
+        deterministic: bool = True,  # z = mu during both training and evaluation
+        input_noise_std: float = DEFAULT_INPUT_NOISE_STD,  # keep 0 by default to avoid hurting reconstruction
     ):
         super().__init__()
         assert MIN_LATENT_DIM <= latent_dim <= MAX_LATENT_DIM, "Latent dimensionality must be between 2 and 4."
@@ -65,7 +79,7 @@ class DeterministicVAE(nn.Module):
                 latent_dim=latent_dim,
                 width_scale=HIDDEN_WIDTH_SCALE_DEFAULT,
                 depth=HIDDEN_DEPTH_DEFAULT,
-                round_to=HIDDEN_ROUND_TO_DEFAULT
+                round_to=HIDDEN_ROUND_TO_DEFAULT,
             )
 
         # Encoder: input -> ... -> (mu, logvar)
@@ -161,19 +175,20 @@ class DeterministicVAE(nn.Module):
 # Wrapper "VectorReducer": API pronta per il tuo flusso
 # ============================================================
 
+
 @dataclass
 class TrainConfig:
-    epochs: int = FINAL_EPOCHS                            
-    lr: float = DEFAULT_LEARNING_RATE                      # Adam without weight decay
-    batch_size: int = DEFAULT_BATCH_SIZE                   # 0 => "full batch" (full dataset at once)
-    grad_clip: Optional[float] = GRAD_CLIP_DEFAULT         # clipping to prevent spikes
-    patience: Optional[int] = None                         # None => no early stopping (overfitting is desirable)
-    kl_beta: float = DEFAULT_KL_BETA                       # disabled by default
-    deterministic: bool = True                             # z = mu (deterministic)
-    input_noise_std: float = DEFAULT_INPUT_NOISE_STD       # disabled by default
+    epochs: int = FINAL_EPOCHS
+    lr: float = DEFAULT_LEARNING_RATE  # Adam without weight decay
+    batch_size: int = DEFAULT_BATCH_SIZE  # 0 => "full batch" (full dataset at once)
+    grad_clip: Optional[float] = GRAD_CLIP_DEFAULT  # clipping to prevent spikes
+    patience: Optional[int] = None  # None => no early stopping (overfitting is desirable)
+    kl_beta: float = DEFAULT_KL_BETA  # disabled by default
+    deterministic: bool = True  # z = mu (deterministic)
+    input_noise_std: float = DEFAULT_INPUT_NOISE_STD  # disabled by default
     activation: str = "silu"
     hidden_dims: Optional[List[int]] = None
-    per_feature_weights: Optional[np.ndarray] = None       # optional: stable wieghting
+    per_feature_weights: Optional[np.ndarray] = None  # optional: stable wieghting
 
 
 class VectorReducer:
@@ -210,7 +225,7 @@ class VectorReducer:
 
     def _build_model(self, cfg: TrainConfig):
         """Build the DeterministicVAE with either explicit hidden_dims or
-           auto-computed ones via compute_hidden_dims policy.
+        auto-computed ones via compute_hidden_dims policy.
         """
         if cfg.hidden_dims is None:
             hd = compute_hidden_dims(
@@ -218,7 +233,7 @@ class VectorReducer:
                 latent_dim=self.latent_dim,
                 width_scale=getattr(cfg, "width_scale", HIDDEN_WIDTH_SCALE_DEFAULT),
                 depth=getattr(cfg, "depth", HIDDEN_DEPTH_DEFAULT),
-                round_to=getattr(cfg, "round_to", HIDDEN_ROUND_TO_DEFAULT)
+                round_to=getattr(cfg, "round_to", HIDDEN_ROUND_TO_DEFAULT),
             )
         else:
             hd = cfg.hidden_dims
@@ -243,13 +258,14 @@ class VectorReducer:
 
     # --------------------------------------------------------
 
-    def fit(self,
-            cfg: Optional[TrainConfig] = None,
-            trial: Optional[optuna.trial.Trial] = None,
-            enable_pruning: bool = PRUNE_ENABLED_DEFAULT,
-            prune_every: Optional[int] = PRUNE_EVERY_EPOCHS,
-            show_progress: bool = False
-            ):
+    def fit(
+        self,
+        cfg: Optional[TrainConfig] = None,
+        trial: Optional[optuna.trial.Trial] = None,
+        enable_pruning: bool = PRUNE_ENABLED_DEFAULT,
+        prune_every: Optional[int] = PRUNE_EVERY_EPOCHS,
+        show_progress: bool = False,
+    ):
         """
         Train the model to overfit (by design) the small dataset.
         Best checkpoint is tracked by reconstruction loss and restored at the end.
@@ -285,12 +301,15 @@ class VectorReducer:
             nb = 0
 
             for start in range(0, self.num_samples, batch_size):
-                idx = perm[start:start + batch_size]
+                idx = perm[start : start + batch_size]
                 batch = self.X[idx]
 
                 x_hat, mu, logvar = model(batch)
                 loss, recon, kl = model.loss_function(
-                    x=batch, x_hat=x_hat, mu=mu, logvar=logvar,
+                    x=batch,
+                    x_hat=x_hat,
+                    mu=mu,
+                    logvar=logvar,
                     kl_beta=model.kl_beta,
                     per_feature_weights=self.per_feature_weights_t,
                 )
@@ -382,7 +401,9 @@ class VectorReducer:
         return F.mse_loss(X_hat, X, reduction="mean").item()
 
     @torch.no_grad()
-    def reconstruction_accuracy(self, threshold: float = RECON_ACCURACY_THRESHOLD, data: Optional[Union[np.ndarray, torch.Tensor]] = None) -> float:
+    def reconstruction_accuracy(
+        self, threshold: float = RECON_ACCURACY_THRESHOLD, data: Optional[Union[np.ndarray, torch.Tensor]] = None
+    ) -> float:
         """
         Percentage of element-wise matches: |x_hat - x| < threshold.
         threshold=0.03 is reasonable for data in [0,1]; adjust as needed.

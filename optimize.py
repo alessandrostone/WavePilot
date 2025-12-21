@@ -1,3 +1,5 @@
+import argparse
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
@@ -34,8 +36,84 @@ from utils import set_global_seeds, space_fingerprint, LatentScaler  # external 
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-log = setup_logger('OptimizationLogger')
-log_progress = setup_logger('ProgressLogger')
+log = setup_logger('OptimizationLogger', file=True)
+log_progress = setup_logger('ProgressLogger', file=True)
+
+
+# -----------------------------
+# Argument parsing
+# -----------------------------
+def get_arguments():
+    parser = argparse.ArgumentParser(
+        description="WavePilot Hyperparameter Optimizer - Optimize VAE and RBF parameters for preset dimensionality reduction",
+        epilog="""
+Examples:
+  # Basic optimization on full dataset
+  python optimize.py -f presets.csv
+
+  # Use only 100 random samples for faster testing
+  python optimize.py -f presets.csv -n 100
+
+  # Custom number of trials for VAE and RBF optimization
+  python optimize.py -f presets.csv --vae-trials 50 --rbf-trials 30
+
+  # Mask specific columns from the dataset
+  python optimize.py -f presets.csv -m cutoff resonance volume
+
+The script performs:
+  1. VAE hyperparameter search (learning rate, KL-beta, latent dimensions, architecture)
+  2. Final VAE training with best parameters
+  3. RBF hyperparameter search (kernel type, smoothing, epsilon, degree)
+  4. Outputs best parameters and reconstruction accuracy metrics
+
+Configuration defaults are loaded from constants.py
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument("-f", "--filepath",
+                        dest="filepath",
+                        type=str,
+                        required=True,
+                        metavar="PATH",
+                        help="Path to input dataset CSV file (required)")
+
+    parser.add_argument("-n", "--num-entries",
+                        dest="num_entries",
+                        type=int,
+                        default=None,
+                        metavar="N",
+                        help="Number of random entries to use from dataset (default: use all)")
+
+    parser.add_argument("-m", "--mask-columns",
+                        dest="mask_columns",
+                        nargs="*",
+                        default=None,
+                        metavar="COL",
+                        help="Space-separated list of columns to exclude from optimization")
+
+    parser.add_argument("--vae-trials",
+                        dest="vae_trials",
+                        type=int,
+                        default=N_TRIALS_VAE,
+                        metavar="N",
+                        help=f"Number of VAE optimization trials (default: {N_TRIALS_VAE})")
+
+    parser.add_argument("--rbf-trials",
+                        dest="rbf_trials",
+                        type=int,
+                        default=N_TRIALS_RBF,
+                        metavar="N",
+                        help=f"Number of RBF optimization trials (default: {N_TRIALS_RBF})")
+
+    parser.add_argument("--seed",
+                        dest="seed",
+                        type=int,
+                        default=GLOBAL_SEED,
+                        metavar="N",
+                        help=f"Random seed for reproducibility (default: {GLOBAL_SEED})")
+
+    return parser.parse_args()
 
 
 # -----------------------------
@@ -78,7 +156,7 @@ def train_and_validate(params, df, trial_number):
     grad_clip   = params.get("grad_clip", 1.0)
     batch_size  = params.get("batch_size", 0)  # 0 = full-batch
 
-    reducer = VectorReducer(df, latent_dim=latent_dim, device=torch.device("cpu"))
+    reducer = VectorReducer(df, latent_dim=latent_dim)  # Auto-detect GPU/MPS/CPU
 
     cfg = TrainConfig(
         epochs=SEARCH_EPOCHS,
@@ -233,12 +311,12 @@ class Optimizer:
             for name, config in VAE_PARAM_RANGES.items()
         }
         try:
-            val_mse, _ = train_and_validate(trial, params, self.df)
+            val_mse = train_and_validate(params, self.df, trial.number)
             return val_mse
         except optuna.TrialPruned:
             raise
 
-    def optimize_vae(self, n_trials=N_TRIALS_VAE):
+    def optimize_vae(self, n_trials=N_TRIALS_VAE, show_progress=True):
         # Reproducible sampler
         sampler = TPESampler(
             seed=GLOBAL_SEED,
@@ -262,12 +340,24 @@ class Optimizer:
 
         set_global_seeds(GLOBAL_SEED)
 
-        # Batch paramters
-        max_workers = max(1, cpu_count())
+        # Batch parameters
+        # CRITICAL: Only use parallel workers if no GPU/MPS available
+        # Multiple processes trying to use GPU/MPS simultaneously will deadlock
+        # Also check for frozen executable (PyInstaller) which doesn't support multiprocessing well
+        is_frozen = getattr(sys, 'frozen', False)
+        if is_frozen:
+            max_workers = 1  # Frozen executables don't support multiprocessing
+            log.info("Frozen executable detected - using sequential execution for VAE optimization")
+        elif torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
+            max_workers = 1  # Sequential execution when GPU/MPS available
+            log.info("GPU/MPS detected - using sequential execution for VAE optimization")
+        else:
+            max_workers = max(1, cpu_count())  # Parallel execution on CPU
+            log.info("CPU-only mode - using %d parallel workers for VAE optimization", max_workers)
 
         total = n_trials
         i = 0
-        pbar = tqdm(total=total, desc="DVAE HPO", leave=True)
+        pbar = tqdm(total=total, desc="DVAE HPO", leave=True, disable=not show_progress)
 
         try:
             while i < total:
@@ -280,25 +370,32 @@ class Optimizer:
                         for name, config in VAE_PARAM_RANGES.items()
                     }
                     batch.append((trial, params))
-                
-                # Parallel execution
-                results = [None] * len(batch)
-                with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                    future_to_idx = {}
-                    for idx, (trial, params) in enumerate(batch):
-                        fut = ex.submit(
-                            train_and_validate,
-                            params,
-                            self.df,
-                            trial.number
-                        )
-                        future_to_idx[fut] = idx
 
-                    # Progress bar when a worker ends
-                    for fut in as_completed(future_to_idx.keys()):
-                        idx = future_to_idx[fut]
-                        results[idx] = fut.result()
+                results = [None] * len(batch)
+
+                if max_workers == 1:
+                    # Sequential execution - avoid ProcessPoolExecutor entirely
+                    for idx, (trial, params) in enumerate(batch):
+                        results[idx] = train_and_validate(params, self.df, trial.number)
                         pbar.update(1)
+                else:
+                    # Parallel execution
+                    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                        future_to_idx = {}
+                        for idx, (trial, params) in enumerate(batch):
+                            fut = ex.submit(
+                                train_and_validate,
+                                params,
+                                self.df,
+                                trial.number
+                            )
+                            future_to_idx[fut] = idx
+
+                        # Progress bar when a worker ends
+                        for fut in as_completed(future_to_idx.keys()):
+                            idx = future_to_idx[fut]
+                            results[idx] = fut.result()
+                            pbar.update(1)
 
                 # tell in batch order
                 for (trial, _), value in zip(batch, results):
@@ -331,7 +428,7 @@ class Optimizer:
         )
         return validation_distance
 
-    def optimize_rbf(self, original_data, reduced_data, n_trials=N_TRIALS_RBF, normalise_latent=True):
+    def optimize_rbf(self, original_data, reduced_data, n_trials=N_TRIALS_RBF, normalise_latent=True, show_progress=True):
         """
         RBF search on latent space:
           - optionally z-score the latent ONCE,
@@ -378,12 +475,12 @@ class Optimizer:
         self.rbf_median_dist_ = median_dist
 
 
-        # CPU-bound, safe to parallelise
+        # CPU-bound, safe to parallelise across all cores
         self.study_rbf.optimize(
             lambda trial: self.objective_rbf(trial, original_data, Z_std, median_dist),
             n_trials=n_trials,
-            n_jobs=1,
-            show_progress_bar=True
+            n_jobs=-1,  # Use all available CPU cores
+            show_progress_bar=show_progress
         )
 
         best_params = self.study_rbf.best_params
@@ -419,14 +516,14 @@ def run_training(best_params_train, df_train):
 # -----------------------------
 # Main orchestration
 # -----------------------------
-def main(filepath, num_entries=None, mask_columns=None):
-    set_global_seeds(GLOBAL_SEED)
+def main(filepath, num_entries=None, mask_columns=None, vae_trials=N_TRIALS_VAE, rbf_trials=N_TRIALS_RBF, seed=GLOBAL_SEED):
+    set_global_seeds(seed)
     df = load_data(filepath, num_entries, mask_columns)
 
     optimizer = Optimizer(df)
 
     # ---- VAE hyperparameter search (minimise MSE) ----
-    best_vae_params = optimizer.optimize_vae()
+    best_vae_params = optimizer.optimize_vae(n_trials=vae_trials)
 
     # ---- Train final VAE with best params ----
     reducer = run_training(best_vae_params, df)
@@ -439,7 +536,7 @@ def main(filepath, num_entries=None, mask_columns=None):
     best_rbf_params = optimizer.optimize_rbf(
         original_data=df,
         reduced_data=latent_points,
-        n_trials=N_TRIALS_RBF,
+        n_trials=rbf_trials,
         normalise_latent=True  # keep True to match the rest of the pipeline
     )
 
@@ -451,4 +548,16 @@ def main(filepath, num_entries=None, mask_columns=None):
     log.info("VAE Reconstruction MSE: %.6f | Acc: %.2f%%", optimizer.study_vae.best_value, accuracy)
     log.info("Best VAE Parameters: %s", best_vae_params)
     log.info("Best RBF Parameters: %s | Validation distance: %.6f", best_rbf_params, optimizer.study_rbf.best_value)
+
+
+if __name__ == "__main__":
+    args = get_arguments()
+    main(
+        filepath=args.filepath,
+        num_entries=args.num_entries,
+        mask_columns=args.mask_columns,
+        vae_trials=args.vae_trials,
+        rbf_trials=args.rbf_trials,
+        seed=args.seed
+    )
 

@@ -6,8 +6,9 @@ This is a minimal implementation for testing the subprocess integration.
 """
 
 import json
-import numpy as np
-from sklearn.model_selection import train_test_split
+# Defer numpy and sklearn imports to avoid startup crash in sandbox
+# import numpy as np
+# from sklearn.model_selection import train_test_split
 from constants import N_TRIALS_VAE, N_TRIALS_RBF
 # Import optimization components individually to avoid logger issues
 try:
@@ -56,6 +57,7 @@ class WavePilotBridge:
 
     def encode_to_latent(self, parameters):
         """Encode parameters to 3D latent space coordinates."""
+        import numpy as np
         if not self.initialized:
             return None
 
@@ -139,6 +141,7 @@ class WavePilotBridge:
 
     def load_optimization_data(self, dataset_path, num_entries=None, test_size=0.2, mask_columns=None):
         """Load data for optimization."""
+        from sklearn.model_selection import train_test_split
         if not load_data or not Optimizer:
             return False
         try:
