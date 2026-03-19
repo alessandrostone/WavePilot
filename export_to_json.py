@@ -65,41 +65,32 @@ def extract_vae_decoder_weights(state_dict: Dict[str, Any], model_meta: Dict[str
     Returns:
         Dict containing decoder_weights and decoder_biases arrays for each layer
     """
-    # Collect decoder layers in order
-    # State dict keys for decoder layers follow pattern:
-    # - decoder_backbone.0.weight, decoder_backbone.0.bias  (first Linear layer)
-    # - decoder_backbone.2.weight, decoder_backbone.2.bias  (second Linear, index=2 because of SiLU at 1)
-    # - fc_out.weight, fc_out.bias (final output layer with Sigmoid)
+    # Collect decoder layers in order.
+    # The model defines: self.decoder = nn.Sequential(Linear, SiLU, Linear, SiLU, ..., Linear, Sigmoid)
+    # State dict keys: decoder.0.weight, decoder.2.weight, decoder.4.weight, ...
+    # (odd indices are activation modules which have no weights)
 
     decoder_weights = []
     decoder_biases = []
 
-    # Extract decoder backbone layers
-    backbone_indices = []
+    # Extract all Linear layers from the decoder Sequential
+    layer_indices = []
     for key in state_dict.keys():
-        if key.startswith("decoder_backbone.") and ".weight" in key:
-            # Extract the layer index (e.g., "decoder_backbone.0.weight" -> 0)
+        if key.startswith("decoder.") and ".weight" in key:
             idx = int(key.split(".")[1])
-            backbone_indices.append(idx)
+            layer_indices.append(idx)
 
-    backbone_indices = sorted(set(backbone_indices))
+    layer_indices = sorted(set(layer_indices))
 
-    for idx in backbone_indices:
-        weight_key = f"decoder_backbone.{idx}.weight"
-        bias_key = f"decoder_backbone.{idx}.bias"
+    for idx in layer_indices:
+        weight_key = f"decoder.{idx}.weight"
+        bias_key = f"decoder.{idx}.bias"
 
         if weight_key in state_dict and bias_key in state_dict:
             weights = state_dict[weight_key].cpu().numpy()
             biases = state_dict[bias_key].cpu().numpy()
             decoder_weights.append(weights)
             decoder_biases.append(biases)
-
-    # Extract final output layer (fc_out)
-    if "fc_out.weight" in state_dict and "fc_out.bias" in state_dict:
-        weights = state_dict["fc_out.weight"].cpu().numpy()
-        biases = state_dict["fc_out.bias"].cpu().numpy()
-        decoder_weights.append(weights)
-        decoder_biases.append(biases)
 
     if not decoder_weights:
         return None

@@ -108,31 +108,27 @@ def extract_vae_decoder_weights(model) -> Optional[dict]:
         decoder_weights = []
         decoder_biases = []
 
-        # Extract decoder backbone layers (Linear layers with SiLU activation)
-        backbone_indices = []
+        # Extract decoder layers from nn.Sequential.
+        # The model defines: self.decoder = nn.Sequential(Linear, SiLU, Linear, SiLU, ..., Linear, Sigmoid)
+        # State dict keys: decoder.0.weight, decoder.2.weight, decoder.4.weight, ...
+        # (odd indices are activation modules which have no weights)
+        layer_indices = []
         for key in state_dict.keys():
-            if key.startswith("decoder_backbone.") and ".weight" in key:
+            if key.startswith("decoder.") and ".weight" in key:
                 idx = int(key.split(".")[1])
-                backbone_indices.append(idx)
+                layer_indices.append(idx)
 
-        backbone_indices = sorted(set(backbone_indices))
+        layer_indices = sorted(set(layer_indices))
 
-        for idx in backbone_indices:
-            weight_key = f"decoder_backbone.{idx}.weight"
-            bias_key = f"decoder_backbone.{idx}.bias"
+        for idx in layer_indices:
+            weight_key = f"decoder.{idx}.weight"
+            bias_key = f"decoder.{idx}.bias"
 
             if weight_key in state_dict and bias_key in state_dict:
                 weights = state_dict[weight_key].cpu().numpy()
                 biases = state_dict[bias_key].cpu().numpy()
                 decoder_weights.append(weights)
                 decoder_biases.append(biases)
-
-        # Extract final output layer (fc_out with Sigmoid activation)
-        if "fc_out.weight" in state_dict and "fc_out.bias" in state_dict:
-            weights = state_dict["fc_out.weight"].cpu().numpy()
-            biases = state_dict["fc_out.bias"].cpu().numpy()
-            decoder_weights.append(weights)
-            decoder_biases.append(biases)
 
         if not decoder_weights:
             return None
