@@ -97,6 +97,9 @@ VAE_PARAM_RANGES = {
     },
     "latent_dim": {
         "type": "categorical",
+        # 2D and 3D both allowed; the host adapts its visualization based on
+        # the trained model's latent_dim (locked top-down camera + 2D cursor
+        # drag for 2D models, free 3D orbit for 3D models).
         "values": [2, 3]
     },
     "width_scale": {
