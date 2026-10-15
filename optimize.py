@@ -1,5 +1,7 @@
 import argparse
 import sys
+import threading
+import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
@@ -316,6 +318,19 @@ class Optimizer:
         except optuna.TrialPruned:
             raise
 
+    # Set by the pipeline: called with (done, total) after every finished
+    # trial so the host can show real progress. Advisory: never raises.
+    progress_cb = None
+
+    def _report_progress(self, done, total):
+        cb = getattr(self, "progress_cb", None)
+        if cb is None:
+            return
+        try:
+            cb(done, total)
+        except Exception as e:  # noqa: BLE001 - progress must not break the search
+            log.debug("progress callback failed: %s", e)
+
     def optimize_vae(self, n_trials=N_TRIALS_VAE, show_progress=True):
         # Reproducible sampler
         sampler = TPESampler(
@@ -358,6 +373,7 @@ class Optimizer:
         total = n_trials
         i = 0
         pbar = tqdm(total=total, desc="DVAE HPO", leave=True, disable=not show_progress)
+        done = 0  # own count: a disabled tqdm never advances pbar.n
 
         try:
             while i < total:
@@ -378,6 +394,8 @@ class Optimizer:
                     for idx, (trial, params) in enumerate(batch):
                         results[idx] = train_and_validate(params, self.df, trial.number)
                         pbar.update(1)
+                        done += 1
+                        self._report_progress(done, total)
                 else:
                     # Parallel execution
                     with ProcessPoolExecutor(max_workers=max_workers) as ex:
@@ -396,6 +414,8 @@ class Optimizer:
                             idx = future_to_idx[fut]
                             results[idx] = fut.result()
                             pbar.update(1)
+                            done += 1
+                            self._report_progress(done, total)
 
                 # tell in batch order
                 for (trial, _), value in zip(batch, results):
@@ -475,12 +495,23 @@ class Optimizer:
         self.rbf_median_dist_ = median_dist
 
 
+        # Completed-trial count for the host's progress (trials finish on
+        # worker threads, in any order)
+        finished = itertools.count(1)
+        count_lock = threading.Lock()
+
+        def _on_trial_done(study, trial):
+            with count_lock:
+                done = next(finished)
+            self._report_progress(done, n_trials)
+
         # CPU-bound, safe to parallelise across all cores
         self.study_rbf.optimize(
             lambda trial: self.objective_rbf(trial, original_data, Z_std, median_dist),
             n_trials=n_trials,
             n_jobs=-1,  # Use all available CPU cores
-            show_progress_bar=show_progress
+            show_progress_bar=show_progress,
+            callbacks=[_on_trial_done]
         )
 
         best_params = self.study_rbf.best_params

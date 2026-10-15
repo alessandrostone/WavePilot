@@ -31,6 +31,7 @@ Example:
 """
 
 import argparse
+import threading
 import json
 import os
 import sys
@@ -248,6 +249,41 @@ def export_to_json(
     log.info("Exported JSON (v%s) to: %s (%.1f KB)", format_version, output_file, file_size_kb)
 
 
+class ProgressWriter:
+    """The pipeline's progress for the host, as a small JSON file.
+
+    The host's worker cannot read our stdout while we run (its read
+    blocks), so it polls this file instead. One object: phase, a fraction
+    of the whole run (or -1 while a phase has no measurable progress) and a
+    detail such as "trial 12/500". Rewritten atomically so a reader never
+    sees half a file. A None path disables it.
+    """
+
+    def __init__(self, path: Optional[str]):
+        self.path = path
+        self._lock = threading.Lock()
+
+    def write(self, phase: str, progress: float, detail: str = "") -> None:
+        if not self.path:
+            return
+        payload = {"phase": phase, "progress": progress, "detail": detail}
+        with self._lock:
+            tmp = self.path + ".tmp"
+            try:
+                with open(tmp, "w") as f:
+                    json.dump(payload, f)
+                os.replace(tmp, self.path)
+            except OSError as e:  # progress is advisory: never fail the run on it
+                log.debug("progress file not written: %s", e)
+
+    def span(self, phase: str, start: float, end: float):
+        """A per-trial callback that maps k/N onto [start, end] of the run."""
+        def report(done: int, total: int) -> None:
+            frac = start + (end - start) * (done / total if total else 1.0)
+            self.write(phase, frac, f"trial {done}/{total}")
+        return report
+
+
 def run_pipeline(
     input_csv: str,
     output_json: str,
@@ -258,7 +294,8 @@ def run_pipeline(
     seed: int = GLOBAL_SEED,
     save_checkpoint: Optional[str] = None,
     compact_json: bool = False,
-    quiet: bool = False
+    quiet: bool = False,
+    progress_file: Optional[str] = None
 ) -> None:
     """
     Execute the complete pipeline from CSV to JSON.
@@ -295,9 +332,12 @@ def run_pipeline(
         log.info("Masking columns: %s", mask_columns)
     log.info("-" * 80)
 
+    progress = ProgressWriter(progress_file)
+
     # ========== PHASE 1: Load Data ==========
     log.info("📂 PHASE 1: Loading dataset...")
     phase_start = time.time()
+    progress.write("Loading data", 0.0)
 
     # Load data using DataLoader to preserve preset names
     data_loader = DataLoader(input_csv, mask_columns)
@@ -324,10 +364,13 @@ def run_pipeline(
 
     optimizer = Optimizer(df)
 
-    # VAE optimization
+    # VAE optimization (the long part: 2 % -> 55 % of the run)
     log.info("Optimizing VAE hyperparameters (%d trials)...", vae_trials)
+    progress.write("VAE search", 0.02, f"trial 0/{vae_trials}")
+    optimizer.progress_cb = progress.span("VAE search", 0.02, 0.55)
     best_vae_params = optimizer.optimize_vae(n_trials=vae_trials, show_progress=show_progress)
     log.info("Best VAE params: %s", best_vae_params)
+    progress.write("Training VAE", -1.0)  # one fit, no measurable progress
 
     # Train final VAE with best params
     log.info("Training final VAE with best parameters...")
@@ -355,8 +398,10 @@ def run_pipeline(
     log.info("VAE reconstruction accuracy: %.2f%%", accuracy)
     log.info("VAE reconstruction MSE: %.6f", optimizer.study_vae.best_value)
 
-    # RBF optimization
+    # RBF optimization (65 % -> 95 %)
     log.info("Optimizing RBF hyperparameters (%d trials)...", rbf_trials)
+    progress.write("RBF search", 0.65, f"trial 0/{rbf_trials}")
+    optimizer.progress_cb = progress.span("RBF search", 0.65, 0.95)
     best_rbf_params = optimizer.optimize_rbf(
         original_data=df,
         reduced_data=latent_points,
@@ -369,6 +414,7 @@ def run_pipeline(
 
     log.info("✅ Phase 2 completed in %.2f seconds", time.time() - phase_start)
     log.info("-" * 80)
+    progress.write("Exporting", 0.95)
 
     # ========== PHASE 3: Prepare Export Data ==========
     log.info("📦 PHASE 3: Preparing export data...")
@@ -438,6 +484,7 @@ def run_pipeline(
         vae_model=reducer.model  # Pass trained VAE model for decoder weight export
     )
 
+    progress.write("Done", 1.0)
     log.info("✅ Phase 5 completed in %.2f seconds", time.time() - phase_start)
     log.info("=" * 80)
 
@@ -557,6 +604,13 @@ For PyInstaller executable:
     )
 
     parser.add_argument(
+        "--progress-file",
+        dest="progress_file",
+        metavar="PATH",
+        default=None,
+        help="Write the pipeline's progress (phase, fraction, trial k/N) to this JSON file for the host"
+    )
+    parser.add_argument(
         "--quiet", "-q",
         dest="quiet",
         action="store_true",
@@ -580,7 +634,8 @@ def main():
             seed=args.seed,
             save_checkpoint=args.save_checkpoint,
             compact_json=args.compact_json,
-            quiet=args.quiet
+            quiet=args.quiet,
+            progress_file=args.progress_file
         )
     except FileNotFoundError as e:
         log.error("❌ File not found: %s", e)
