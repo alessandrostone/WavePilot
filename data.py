@@ -148,7 +148,7 @@ class DataLoader:
         """Apply all necessary preprocessing steps to the dataset (column-wise)."""
         df = self._drop_id_column(df)
         df = self._remove_non_numeric_columns(df)
-        df = self._drop_nan_columns(df)
+        df = self._fill_nan_columns(df)
 
         if self.mask_columns:
             df = self._mask_columns(df)
@@ -170,12 +170,19 @@ class DataLoader:
             logging.info("Non-numeric columns removed: %s", list(non_numeric_cols))
         return df[numeric_cols]
 
-    def _drop_nan_columns(self, df: pd.DataFrame):
-        """Drop columns that are entirely NaN."""
+    def _fill_nan_columns(self, df: pd.DataFrame):
+        """Keep every column, NaN as 0.
+
+        parameter_values in the exported model are applied by INDEX in the
+        host, so the column count must stay the plugin's parameter count.
+        Dropping an all-NaN column (a parameter the host could not read)
+        shifted every later parameter of the trained model by one.
+        """
         nan_cols = df.columns[df.isna().all()].tolist()
         if nan_cols:
-            logging.info("Columns with all NaN values removed: %s", list(nan_cols))
-        return df.dropna(axis=1, how='all')
+            logging.info("Columns with all NaN values kept as zeros (parameter order preserved): %s",
+                         list(nan_cols))
+        return df.fillna(0.0)
 
     def _mask_columns(self, df: pd.DataFrame):
         """Mask specified columns by removing them from the dataset."""
